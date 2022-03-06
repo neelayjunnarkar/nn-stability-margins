@@ -1,6 +1,5 @@
 import gym
 from gym import spaces
-from gym.utils import seeding
 import numpy as np
 
 class LinearizedInvertedPendulumEnv(gym.Env):
@@ -32,7 +31,7 @@ class LinearizedInvertedPendulumEnv(gym.Env):
         self.nu = self.BG.shape[1]
 
         if observation == 'full':
-            self.CG = np.eye(self.nx)
+            self.CG = np.eye(self.nx, dtype=np.float32)
         elif observation == 'partial':
             self.CG = np.array([[1, 0]], dtype=np.float32)
         else:
@@ -60,7 +59,6 @@ class LinearizedInvertedPendulumEnv(gym.Env):
     #         and np.all(self.state <= self.state_space.high)
 
     def step(self, u):
-        # u = u.astype(np.float32)
         th, thdot = self.state
 
         u = np.clip(u, -self.max_torque, self.max_torque)

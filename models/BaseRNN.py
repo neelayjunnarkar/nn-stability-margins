@@ -22,7 +22,8 @@ class BaseRNN(RecurrentNetwork, nn.Module):
         B_phi = torch.tensor(1),
         log_std_init = None,
         nn_baseline_n_layers = 2,
-        nn_baseline_size = 64
+        nn_baseline_size = 64,
+        **_ignore_args
     ):
         assert 2*action_space.shape[0] == num_outputs, "Num outputs should be 2 * action dimension"
         assert state_size is not None, "state_size is None"

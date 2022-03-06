@@ -12,7 +12,7 @@ class ThetaHatParameterization:
         exp_stability_rate,
         plant_cstor,
         plant_config,
-        ac_dim,
+        ac_dim, 
         ob_dim,
         state_size,
         hidden_size

@@ -3,6 +3,7 @@ import ray
 from envs.linearized_inverted_pendulum import LinearizedInvertedPendulumEnv
 from models.RNN import RNNModel
 from models.ProjRNN import ProjRNNModel
+from models.ProREN import ProjRENModel
 import numpy as np
 
 from trainers import ProjectedPGTrainer, ProjectedPPOTrainer
@@ -19,7 +20,7 @@ config = {
     # "env": "Taxi-v3",
     "env_config": env_config,
     "model": {
-        "custom_model": ProjRNNModel,
+        "custom_model": ProjRENModel,
         "custom_model_config": {
             "state_size": 2,
             "hidden_size": 16,
@@ -57,10 +58,8 @@ config = {
 }
 
 ray.init()
-# Create our RLlib Trainer
-trainer = ProjectedPGTrainer(env=config["model"]["custom_model_config"]["plant_cstor"], config=config)
-# trainer = ProjectedPPOTrainer(env=config["model"]["custom_model_config"]["plant_cstor"], config=config)
-# trainer = ProjectedPGTrainer(env=LinearizedInvertedPendulumEnv, config = config)
+# trainer = ProjectedPGTrainer(env=config["model"]["custom_model_config"]["plant_cstor"], config=config)
+trainer = ProjectedPPOTrainer(env=config["model"]["custom_model_config"]["plant_cstor"], config=config)
 
 # Run it for n training iterations. A training iteration includes
 # parallel sample collection by the environment workers as well as

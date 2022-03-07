@@ -71,8 +71,9 @@ class InvertedPendulumEnv(gym.Env):
         th, thdot = self.state
 
         u = np.clip(u, -self.max_torque, self.max_torque)
-        costs = 1/self.factor**2*(th**2 + .1*thdot**2 + 1*((u*self.factor)**2)) - 5
-        # costs = 1*th**2 + 0.1**thdot**2 + 0.01*(u*self.factor)**2 + 5*np.max([0, np.abs(u*self.factor)-0.5])
+        # costs = 1/self.factor**2*(th**2 + .1*thdot**2 + 1*((u*self.factor)**2)) - 5
+        # costs = 1*th**2 + 0.1*thdot**2 + 0.01*(u*self.factor)**2 + 5*np.max([0, np.abs(u*self.factor)-0.5])
+        costs = np.max([0, np.abs(u[0]*self.factor)-0.5]) - self.max_torque*self.factor
         
         self.state = self.AG @ self.state + self.BG1 @ np.sin(self.CG2 @ self.state) + self.BG2 @ (u*self.factor)
 
@@ -82,7 +83,7 @@ class InvertedPendulumEnv(gym.Env):
 
         self.time += 1
 
-        return self.get_obs(), -costs[0], terminated, {}
+        return self.get_obs(), -costs, terminated, {}
 
     def reset(self):
         # high = np.array([np.pi/30, np.pi/20]) * self.factor

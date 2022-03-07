@@ -15,8 +15,16 @@ from trainers import ProjectedPGTrainer, ProjectedPPOTrainer
 import torch
 import torch.nn as nn
 from deq_lib.solvers import broyden, anderson
+import os
+import math
 
-env = PowergridEnv
+N_CPUS  = int(os.getenv('SLURM_CPUS_ON_NODE'))
+n_tasks = 1
+n_workers_per_task = int(math.floor(N_CPUS/n_tasks))-1-1
+
+print('==================Using ', n_workers_per_task, ' workers per task==========================')
+
+env = InvertedPendulumEnv
 env_config = {
     "observation": "partial",
     "normed": True,
@@ -32,8 +40,8 @@ config = {
     "model": {
         "custom_model": ProjRNNModel,
         "custom_model_config": {
-            "state_size": 20, #tune.choice([2, 16, 32]), #2,
-            "hidden_size": 20, #tune.choice([2, 16, 32]), # 16
+            "state_size": 16, # tune.grid_search([2, 8, 16]), #2,
+            "hidden_size": 16, #tune.choice([2, 16, 32]), # 16
             "phi_cstor": nn.Tanh,
             "A_phi": torch.tensor(0),
             "B_phi": torch.tensor(1),
@@ -54,7 +62,7 @@ config = {
     # Use 2 environment workers (aka "rollout workers") that parallelly
     # collect samples from their own environment clone(s).
     # "num_envs_per_worker": 8,
-    "num_workers": 2,
+    "num_workers": n_workers_per_task,
     "framework": "torch",
     "num_gpus": 0,
     # Set up a separate evaluation worker set for the
@@ -89,7 +97,7 @@ def name_creator(trial):
     return name
 
 results = tune.run(
-    ProjectedPGTrainer,
+    ProjectedPPOTrainer,
     config = config,
     stop = {
         # "episode_reward_mean": 990,
@@ -99,8 +107,12 @@ results = tune.run(
     # search_alg = optuna_search,
     # scheduler = asha_scheduler,
     # fail_fast = True,
-    # verbose = False
-    trial_name_creator = name_creator
+    verbose = 2,
+    trial_name_creator = name_creator,
+    name = 'InvPend_BoundedActionReward_PPO',
+    local_dir = '/global/scratch/users/neelayjunnarkar/ray_results',
+    checkpoint_at_end = True,
+	
 )
 
 metric = "episode_reward_mean"

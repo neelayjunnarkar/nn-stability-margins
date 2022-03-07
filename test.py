@@ -1,5 +1,3 @@
-# Import the RL algorithm (Trainer) we would like to use.
-from ast import Pow
 import ray
 from ray import tune
 from envs import CartpoleEnv, InvertedPendulumEnv, LinearizedInvertedPendulumEnv, PendubotEnv, VehicleLateralEnv, PowergridEnv

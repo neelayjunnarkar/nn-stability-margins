@@ -88,7 +88,7 @@ class InvertedPendulumEnv(gym.Env):
 
     def reset(self):
         # high = np.array([np.pi/30, np.pi/20]) * self.factor
-        high = 0.75 * np.array([self.max_pos, self.max_speed], dtype=np.float32) * self.factor
+        high = np.array([0.75 * self.max_pos, 0.5 * self.max_speed], dtype=np.float32) * self.factor
         self.state = self.np_random.uniform(low=-high, high=high).astype(np.float32)
         self.time = 0
 

@@ -293,69 +293,178 @@ class LinProjector:
 
         return oX, oY, oN11, oN12, oN21, oN22, oLambda_c, oN12_h, oN21_h, oDK1_t, oDK3_h, oDK4_h
 
-# class NonlinProjector:
-#     def __init__(self, AG_t, BG1_t, BG2, CG1, CG2_t, DG3_t,
-#                 eps, decay_factor, state_size, hidden_size, ob_dim, ac_dim, rnn = False):
-#         self.ac_dim = ac_dim
-#         self.ob_dim = ob_dim
-#         self.state_size = state_size
-#         self.hidden_size = hidden_size
-#         self.plant_state_size = AG_t.shape[0]
-#         self.eps = eps
-#         self.decay_factor = decay_factor
+class NonlinProjector:
+    def __init__(self, AG_t, BG1_t, BG2, CG1, CG2_t, DG3_t,
+                eps, decay_factor, state_size, hidden_size, ob_dim, ac_dim,
+                rnn = False, recenter_lambda_p = True):
+        self.ac_dim = ac_dim
+        self.ob_dim = ob_dim
+        self.state_size = state_size
+        self.hidden_size = hidden_size
+        self.plant_state_size = AG_t.shape[0]
+        self.eps = eps
+        self.decay_factor = decay_factor
 
-#         self.rnn = rnn
+        self.rnn = rnn
+        self.recenter_lambda_p = recenter_lambda_p
 
-#         self.AG_t = AG_t
-#         self.BG1_t = BG1_t
-#         self.BG2 = BG2
-#         self.CG1 = CG1
-#         self.CG2_t = CG2_t
-#         self.DG3_t = DG3_t
+        self.AG_t = AG_t
+        self.BG1_t = BG1_t
+        self.BG2 = BG2
+        self.CG1 = CG1
+        self.CG2_t = CG2_t
+        self.DG3_t = DG3_t
 
-#         self.pX   = cp.Parameter((self.plant_state_size, self.plant_state_size), symmetric = True)
-#         self.pY   = cp.Parameter((self.plant_state_size, self.plant_state_size), symmetric = True)
-#         self.pN11 = cp.Parameter((self.plant_state_size, self.plant_state_size))
-#         self.pN12 = cp.Parameter((self.plant_state_size, self.ob_dim))
-#         self.pN21 = cp.Parameter((self.ac_dim, self.plant_state_size))
-#         self.pN22 = cp.Parameter((self.ac_dim, self.ob_dim))
-#         self.pLambda_p = cp.Parameter((self.plant_state_size, self.plant_state_size), diag = True)
-#         self.pLambda_p_CG2_t = cp.Parameter((self.plant_state_size, self.CG2_t.shape[1]))
-#         self.pLambda_c = cp.Parameter((self.hidden_size, self.hidden_size), diag = True)
-#         self.pN12_h = cp.Parameter((self.plant_state_size, self.hidden_size))
-#         self.pN21_h = cp.Parameter((self.hidden_size, self.plant_state_size))
-#         self.pDK1_t = cp.Parameter((self.ac_dim, self.hidden_size))
-#         if self.rnn:
-#             self.pDK3_h = np.zeros((self.hidden_size, self.hidden_size))
-#         else:
-#             self.pDK3_h = cp.Parameter((self.hidden_size, self.hidden_size))
-#         self.pDK4_h = cp.Parameter((self.hidden_size, self.ob_dim))
+        # Setting up problem 1 to project theta hat
 
-#         obj_params = [self.pX, self.pY, self.pN11, self.pN12, self.pN21, self.pN22, 
-#             self.pLambda_c, self.pN12_h, self.pN21_h, self.pDK1_t, self.pDK3_h, self.pDK4_h]
+        self.pX   = cp.Parameter((self.plant_state_size, self.plant_state_size), symmetric = True)
+        self.pY   = cp.Parameter((self.plant_state_size, self.plant_state_size), symmetric = True)
+        self.pN11 = cp.Parameter((self.plant_state_size, self.plant_state_size))
+        self.pN12 = cp.Parameter((self.plant_state_size, self.ob_dim))
+        self.pN21 = cp.Parameter((self.ac_dim, self.plant_state_size))
+        self.pN22 = cp.Parameter((self.ac_dim, self.ob_dim))
+        self.pLambda_p = cp.Parameter((self.plant_state_size, self.plant_state_size), diag = True)
+        self.pLambda_c = cp.Parameter((self.hidden_size, self.hidden_size), diag = True)
+        self.pN12_h = cp.Parameter((self.plant_state_size, self.hidden_size))
+        self.pN21_h = cp.Parameter((self.hidden_size, self.plant_state_size))
+        self.pDK1_t = cp.Parameter((self.ac_dim, self.hidden_size))
+        if self.rnn:
+            self.pDK3_h = np.zeros((self.hidden_size, self.hidden_size))
+        else:
+            self.pDK3_h = cp.Parameter((self.hidden_size, self.hidden_size))
+        self.pDK4_h = cp.Parameter((self.hidden_size, self.ob_dim))
 
-#         self.vX = cp.Variable(self.pX.shape, symmetric = True)
-#         self.vY = cp.Variable(self.pY.shape, symmetric = True)
-#         self.vN11 = cp.Variable(self.pN11.shape)
-#         self.vN12 = cp.Variable(self.pN12.shape)
-#         self.vN21 = cp.Variable(self.pN21.shape)
-#         self.vN22 = cp.Variable(self.pN22.shape)
-#         self.vLambda_c = cp.Variable(self.pLambda_c.shape, diag = True)
-#         self.vN12_h = cp.Variable(self.pN12_h.shape)
-#         self.vN21_h = cp.Variable(self.pN21_h.shape)
-#         self.vDK1_t = cp.Variable(self.pDK1_t.shape)
-#         if self.rnn:
-#             self.vDK3_h = np.zeros_like(self.pDK3_h)
-#         else:
-#             self.vDK3_h = cp.Variable(self.pDK3_h.shape)
-#         self.vDK4_h = cp.Variable(self.pDK4_h.shape)
+        obj_params = [self.pX, self.pY, self.pN11, self.pN12, self.pN21, self.pN22, 
+            self.pLambda_c, self.pN12_h, self.pN21_h, self.pDK1_t, self.pDK3_h, self.pDK4_h]
 
-#         variables = [self.vX, self.vY, self.vN11, self.vN12, self.vN21, self.vN22, 
-#             self.vLambda_c, self.vN12_h, self.vN21_h, self.vDK1_t, self.vDK3_h, self.vDK4_h]
+        self.vX = cp.Variable(self.pX.shape, symmetric = True)
+        self.vY = cp.Variable(self.pY.shape, symmetric = True)
+        self.vN11 = cp.Variable(self.pN11.shape)
+        self.vN12 = cp.Variable(self.pN12.shape)
+        self.vN21 = cp.Variable(self.pN21.shape)
+        self.vN22 = cp.Variable(self.pN22.shape)
+        self.vLambda_c = cp.Variable(self.pLambda_c.shape, diag = True)
+        self.vN12_h = cp.Variable(self.pN12_h.shape)
+        self.vN21_h = cp.Variable(self.pN21_h.shape)
+        self.vDK1_t = cp.Variable(self.pDK1_t.shape)
+        if self.rnn:
+            self.vDK3_h = np.zeros_like(self.pDK3_h)
+        else:
+            self.vDK3_h = cp.Variable(self.pDK3_h.shape)
+        self.vDK4_h = cp.Variable(self.pDK4_h.shape)
 
-#         condition = construct_condition(variables, self.AG_t, self.BG2, self.CG1, self.decay_factor, \
-#         nonlin = True, Lambda_p = Lambda_p, BG1_t = self.BG1_t, CG2_t = self.CG2_t, DG3_t = self.DG3_t)
+        variables = [self.vX, self.vY, self.vN11, self.vN12, self.vN21, self.vN22, 
+            self.vLambda_c, self.vN12_h, self.vN21_h, self.vDK1_t, self.vDK3_h, self.vDK4_h]
+
+        condition = construct_condition(
+            variables, self.AG_t, self.BG2, self.CG1, self.decay_factor,
+            nonlin = True, Lambda_p = self.pLambda_p,
+            BG1_t = self.BG1_t, CG2_t = self.CG2_t, DG3_t = self.DG3_t
+        )
+
+        constraints = [
+            self.vX - self.eps * np.eye(self.vX.shape[0]) >> 0,
+            self.vY - self.eps * np.eye(self.vY.shape[0]) >> 0,
+            self.vLambda_c - self.eps * np.eye(self.vLambda_c.shape[0]) >> 0,
+            condition - self.eps * np.eye(condition.shape[0]) >> 0
+        ]
+
+        obj = sum([cp.sum_squares(var - vVar) for (var, vVar) in zip(obj_params, variables)])
+
+        self.prob1 = cp.Problem(cp.Minimize(obj), constraints)
+
+        # Setting up the second problem to recenter Lambda_p
+        if self.recenter_lambda_p:
+            self.vLambda_p = cp.Variable(self.pLambda_p.shape, diag = True)
+
+            condition2 = construct_condition(
+                obj_params, self.AG_t, self.BG2, self.CG1, self.decay_factor,
+                nonlin = True, Lambda_p = self.vLambda_p,
+                BG1_t = self.BG1_t, CG2_t = self.CG2_t, DG3_t = self.DG3_t
+            )
+            constraints2 = [
+                self.vLambda_p - self.eps * np.eye(self.vLambda_p.shape[0]) >> 0,
+                condition2 - self.eps * np.eye(condition2.shape[0]) >> 0
+            ]
+            self.prob2 = cp.Problem(cp.Minimize(0), constraints2)
+
+        # Initial Lambda_p value
         
-#         self.pLambda_p.value = np.eye(self.plant_state_size)
+        self.pLambda_p.value = np.eye(self.plant_state_size)
 
-#     def construct_parameterized_condition(self, variables, )
+    def project(self, X, Y, N11, N12, N21, N22, Lambda_c, N12_h, N21_h, DK1_t, DK3_h, DK4_h):
+        if self.rnn:
+            DK3_h = self.pDK3_h # Zero DK3_h out
+        
+        # Check if input theta hat parameters are already within stabilizing set
+        originals = [X,   Y,  N11,  N12,  N21,  N22,  Lambda_c,  N12_h,  N21_h,  DK1_t,  DK3_h,  DK4_h]
+        if satisfy_lmi(originals, self.AG_t, self.BG2, self.CG1, self.eps, self.decay_factor,
+            nonlin = True, Lambda_p = self.pLambda_p.value.toarray(),
+            BG1_t=self.BG1_t, CG2_t=self.CG2_t, DG3_t=self.DG3_t):
+            return [None for _ in originals]
+
+        # Project theta hat to stabilizing set.
+        self.pX.value = X
+        self.pY.value = Y
+        self.pN11.value = N11
+        self.pN12.value = N12
+        self.pN21.value = N21
+        self.pN22.value = N22
+        self.pLambda_c.value = Lambda_c
+        self.pN12_h.value = N12_h
+        self.pN21_h.value = N21_h
+        self.pDK1_t.value = DK1_t
+        if not self.rnn:
+            self.pDK3_h.value = DK3_h
+        self.pDK4_h.value = DK4_h
+
+        t0 = time.process_time()
+        self.prob1.solve(solver = cp.MOSEK)
+        tf = time.process_time()
+        print('REN Nonlin Projection: Objective value: ', self.prob1.value)
+        print('REN Nonlin Projection: Computed in: ', tf - t0, 'time')
+
+        oX   = self.vX.value
+        oY   = self.vY.value
+        oN11 = self.vN11.value
+        oN12 = self.vN12.value
+        oN21 = self.vN21.value
+        oN22 = self.vN22.value
+        oLambda_c = self.vLambda_c.value.toarray() # Needs 'toarray' since is a sparse matrix (because diagonal
+        oN12_h  = self.vN12_h.value
+        oN21_h  = self.vN21_h.value
+        oDK1_t  = self.vDK1_t.value
+        if self.rnn:
+            oDK3_h = self.vDK3_h
+        else:
+            oDK3_h  = self.vDK3_h.value
+        oDK4_h  = self.vDK4_h.value
+
+        # Re-center Lambda p
+        if self.recenter_lambda_p:
+            self.pX.value   = self.vX.value
+            self.pY.value   = self.vY.value
+            self.pN11.value = self.vN11.value
+            self.pN12.value = self.vN12.value
+            self.pN21.value = self.vN21.value
+            self.pN22.value = self.vN22.value
+            self.pLambda_c.value = self.vLambda_c.value.toarray()
+            self.pN12_h.value  = self.vN12_h.value
+            self.pN21_h.value  = self.vN21_h.value
+            self.pDK1_t.value  = self.vDK1_t.value
+            if self.rnn:
+                self.pDK3_h.value = self.vDK3_h
+            else:
+                self.pDK3_h.value = self.vDK3_h.value
+            self.pDK4_h.value  = self.vDK4_h.value
+
+
+            t0 = time.process_time()
+            self.prob2.solve(solver = cp.MOSEK)
+            tf = time.process_time()
+            print('REN Nonlin Update LambdaP Projection: Objective value: ', self.prob2.value)
+            print('REN Nonlin Update LambdaP Projection: Computed in: ', tf - t0, 'time')
+
+            self.pLambda_p.value = self.vLambda_p.value.toarray()
+
+        return oX, oY, oN11, oN12, oN21, oN22, oLambda_c, oN12_h, oN21_h, oDK1_t, oDK3_h, oDK4_h

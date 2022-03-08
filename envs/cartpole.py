@@ -12,7 +12,8 @@ class CartpoleEnv(gym.Env):
         self.viewer = None
         self.dt = 0.02 # Sampling time.
         self.max_control = 2 # Max control input.
-        self.time_max = 200
+        self.soft_max_control = self.max_control/4
+        self.time_max = 30
 
         # Discrete time model
         # x(k+1) = AG x(k) + BG u(k)
@@ -64,16 +65,12 @@ class CartpoleEnv(gym.Env):
             self.CG = self.CG / self.observation_space.high[:, np.newaxis]
 
         self.state_size = self.nx
-
-    # def in_state_space(self):
-    #     return self.state.shape == self.state_space.shape \
-    #         and np.all(self.state >= self.state_space.low) \
-    #         and np.all(self.state <= self.state_space.high)
     
     def step(self, u):
         x1, x2, x3, x4 = self.state
         u = np.clip(u, -self.max_control, self.max_control)
-        costs = 1/self.factor**2 * (1.0 * x1**2 + 1.0 * x2**2 + 0.04 * x3**2 + 0.1 * x4**2 + 0.2 * (u * self.factor)**2) - 5.0
+        # costs = 1/self.factor**2 * (1.0 * x1**2 + 1.0 * x2**2 + 0.04 * x3**2 + 0.1 * x4**2 + 0.2 * (u * self.factor)**2) - 5.0
+        costs = 10*(np.max([0, np.abs(u[0]*self.factor)-self.soft_max_control]) - self.max_control*self.factor)
 
         self.state = self.AG @ self.state + self.BG @ u
 
@@ -83,7 +80,7 @@ class CartpoleEnv(gym.Env):
 
         self.time += 1
 
-        return self.get_obs(), -costs[0], terminated, {}
+        return self.get_obs(), -costs, terminated, {}
 
     def reset(self, *, seed = None, options = None):
         high = np.array([0.05, 0.05, 0.25, 0.15], dtype=np.float32)

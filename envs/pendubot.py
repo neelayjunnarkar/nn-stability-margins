@@ -17,8 +17,9 @@ class PendubotEnv(gym.Env):
         # maximum control input
         self.control_scale = 1
         self.max_control = 1.0 * self.control_scale * 2
+        self.soft_max_control = self.max_control / 4
 
-        self.time_max = 200
+        self.time_max = 30
 
         # Pendubot dynamics from Section V-A in https://ieeexplore.ieee.org/stamp/stamp.jsp?arnumber=9345365
         # x1-theta1, x2-theta1dot, x3-theta2, x4-theta2dot
@@ -69,8 +70,9 @@ class PendubotEnv(gym.Env):
     def step(self,u):
         x1, x2, x3, x4 = self.state
         u = np.clip(u, -self.max_control, self.max_control)
-        costs = 1/self.factor**2 * (1.0 * x1**2 + 0.05 * x2**2 + 1.0 * x3**2 + 0.05 * x4**2 + 0.2 * (u / self.control_scale * self.factor)**2) - 5.0
-
+        # costs = 1/self.factor**2 * (1.0 * x1**2 + 0.05 * x2**2 + 1.0 * x3**2 + 0.05 * x4**2 + 0.2 * (u / self.control_scale * self.factor)**2) - 5.0
+        costs = 10*(np.max([0, np.abs(u[0]*self.factor)-self.soft_max_control]) - self.max_control*self.factor)
+        
         self.state = self.AG @ self.state + self.BG @ u
 
         terminated = False
@@ -79,7 +81,7 @@ class PendubotEnv(gym.Env):
 
         self.time += 1
 
-        return self.get_obs(), -costs[0], terminated, {}
+        return self.get_obs(), -costs, terminated, {}
 
     def reset(self):
         high = np.array([0.05, 0.1, 0.05, 0.1], dtype=np.float32) * self.factor

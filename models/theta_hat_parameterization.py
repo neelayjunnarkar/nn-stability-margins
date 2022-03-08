@@ -1,7 +1,7 @@
 import numpy as np
 import torch
 import torch.nn as nn
-from models.ren_projection import ren_project_nonlin, LinProjector
+from models.ren_projection import ren_project_nonlin, LinProjector, NonlinProjector
 from models.utils import uniform, to_numpy, from_numpy     
 
 class ThetaHatParameterization:
@@ -50,8 +50,6 @@ class ThetaHatParameterization:
         self.N12 = nn.Parameter(uniform(self.plant_state_size, ob_dim))
         self.N21 = nn.Parameter(uniform(ac_dim, self.plant_state_size))
         self.N22 = nn.Parameter(uniform(ac_dim, ob_dim))
-        if self.plant_is_nonlin:
-            self.Lambda_p_vec = torch.ones(self.plant_nonlin_size)
         self.Lambda_c_vec = nn.Parameter(torch.rand(hidden_size)) # Must be positive
         self.N12_h = nn.Parameter(uniform(self.plant_state_size, hidden_size))
         self.N21_h = nn.Parameter(uniform(hidden_size, self.plant_state_size))
@@ -64,18 +62,25 @@ class ThetaHatParameterization:
             self.DK3_h = nn.Parameter(DK3_h_cstor)
         self.DK4_h = nn.Parameter(uniform(hidden_size, ob_dim))
 
-        if not self.plant_is_nonlin:
-            self.lin_projector = LinProjector(plant.AG, plant.BG, plant.CG, 
+
+        if self.plant_is_nonlin:
+            self.projector = NonlinProjector(
+                to_numpy(self.AG_t), to_numpy(self.BG1_t), to_numpy(self.BG2),
+                to_numpy(self.CG1), to_numpy(self.CG2_t), to_numpy(self.DG3_t),
                 self.lmi_eps, self.exp_stability_rate,
-                state_size, hidden_size, ob_dim, self.ac_dim, rnn = self.rnn)
+                state_size, hidden_size, ob_dim, ac_dim,
+                rnn = self.rnn, recenter_lambda_p = True
+            )
+        else:
+            self.projector = LinProjector(plant.AG, plant.BG, plant.CG, 
+                self.lmi_eps, self.exp_stability_rate,
+                state_size, hidden_size, ob_dim, ac_dim, rnn = self.rnn)
 
         self.project()
 
     def construct_theta_h(self):
         self.X = self.X_cstor + self.X_cstor.t()
         self.Y = self.Y_cstor + self.Y_cstor.t()
-        if self.plant_is_nonlin:
-            self.Lambda_p = torch.diag(self.Lambda_p_vec)
         self.Lambda_c = torch.diag(self.Lambda_c_vec)
 
     def project(self):
@@ -90,32 +95,16 @@ class ThetaHatParameterization:
         N12 = to_numpy(self.N12)
         N21  = to_numpy(self.N21)
         N22 = to_numpy(self.N22)
-        if self.plant_is_nonlin:
-           Lambda_p = to_numpy(self.Lambda_p)
         Lambda_c = to_numpy(self.Lambda_c)
         N12_h = to_numpy(self.N12_h)
         N21_h = to_numpy(self.N21_h)
         DK1_t = to_numpy(self.DK1_t)
         DK3_h = to_numpy(self.DK3_h)
         DK4_h = to_numpy(self.DK4_h)
-        if self.plant_is_nonlin:
-            AG_t  = to_numpy(self.AG_t)
-            BG2   = to_numpy(self.BG2)
-            CG1   = to_numpy(self.CG1)
-            BG1_t = to_numpy(self.BG1_t)
-            CG2_t = to_numpy(self.CG2_t)
-            DG3_t = to_numpy(self.DG3_t)
 
-        if self.plant_is_nonlin:
-            X, Y, N11, N12, N21, N22, Lambda_c, N12_h, N21_h, DK1_t, DK3_h, DK4_h = \
-                ren_project_nonlin(X, Y, N11, N12, N21, N22, Lambda_p, Lambda_c, N12_h, N21_h, \
-                    DK1_t, DK3_h, DK4_h, \
-                    AG_t, BG1_t, BG2, CG1, CG2_t, DG3_t, \
-                    eps = self.lmi_eps, decay_factor = self.exp_stability_rate, rnn = self.rnn)
-        else:
-            X, Y, N11, N12, N21, N22, Lambda_c, N12_h, N21_h, DK1_t, DK3_h, DK4_h = self.lin_projector.project(
-                X, Y, N11, N12, N21, N22, Lambda_c, N12_h, N21_h, DK1_t, DK3_h, DK4_h
-            )
+        X, Y, N11, N12, N21, N22, Lambda_c, N12_h, N21_h, DK1_t, DK3_h, DK4_h = self.projector.project(
+            X, Y, N11, N12, N21, N22, Lambda_c, N12_h, N21_h, DK1_t, DK3_h, DK4_h
+        )
 
         if X is not None: # If X is None then the parameters after the gradient step already are stabilizing.
             X_cstor = X/2.0

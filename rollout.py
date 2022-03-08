@@ -36,8 +36,9 @@ phi_map = {
     "<class 'torch.nn.modules.activation.Tanh'>": nn.Tanh
 }
 
-def load_agent(directory):
-    checkpoint_path = directory + '/checkpoint_001000/checkpoint-1000'
+def load_agent(directory, checkpoint_path = None):
+    if checkpoint_path is None:
+        checkpoint_path = directory + '/checkpoint_001000/checkpoint-1000'
 
     config_file = open(directory + '/params.json', 'r')
     config = json.load(config_file)
@@ -98,11 +99,14 @@ def compute_rollout(agent, env, init_obs):
 # rnn_dir = '../ray_results/InvPend_BoundedActionReward_PPO/ProjRNNModel_InvertedPendulumEnv_0_2022-03-06_23-04-58'
 # ren_dir = '../ray_results/InvPend_BoundedActionReward_PPO/ProjRENModel_InvertedPendulumEnv_0_2022-03-06_23-01-13'
 
-ren_dir = '../ray_results/InvPend_BoundedActionReward_ShortRollout_PPO/ProjRENModel_InvertedPendulumEnv_0_2022-03-07_13-47-48'
-rnn_dir = '../ray_results/InvPend_BoundedActionReward_ShortRollout_PPO/ProjRNNModel_InvertedPendulumEnv_0_2022-03-07_13-45-25'
+# ren_dir = '../ray_results/InvPend_BoundedActionReward_ShortRollout_PPO/ProjRENModel_InvertedPendulumEnv_0_2022-03-07_13-47-48'
+# rnn_dir = '../ray_results/InvPend_BoundedActionReward_ShortRollout_PPO/ProjRNNModel_InvertedPendulumEnv_0_2022-03-07_13-45-25'
 
-ren_agent, _ = load_agent(ren_dir)
-rnn_agent, env = load_agent(rnn_dir)
+ren_dir = '../ray_results/scratch/ProjRENModel_InvertedPendulumEnv_0_2022-03-07_23-34-32'
+rnn_dir = '../ray_results/scratch/ProjRNNModel_InvertedPendulumEnv_0_2022-03-07_23-17-20'
+
+ren_agent, _ = load_agent(ren_dir, checkpoint_path=ren_dir + '/checkpoint_000010/checkpoint-10')
+rnn_agent, env = load_agent(rnn_dir, checkpoint_path=rnn_dir + '/checkpoint_000100/checkpoint-100')
 
 N_iters = 3
 ren_states = []

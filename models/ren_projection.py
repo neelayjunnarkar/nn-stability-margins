@@ -295,13 +295,15 @@ class LinProjector:
 
 class NonlinProjector:
     def __init__(self, AG_t, BG1_t, BG2, CG1, CG2_t, DG3_t,
-                eps, decay_factor, state_size, hidden_size, ob_dim, ac_dim,
+                eps, decay_factor,
+                state_size, hidden_size, ob_dim, ac_dim,
                 rnn = False, recenter_lambda_p = True):
         self.ac_dim = ac_dim
         self.ob_dim = ob_dim
         self.state_size = state_size
         self.hidden_size = hidden_size
         self.plant_state_size = AG_t.shape[0]
+        self.plant_nonlin_size = CG2_t.shape[0]
         self.eps = eps
         self.decay_factor = decay_factor
 
@@ -323,7 +325,7 @@ class NonlinProjector:
         self.pN12 = cp.Parameter((self.plant_state_size, self.ob_dim))
         self.pN21 = cp.Parameter((self.ac_dim, self.plant_state_size))
         self.pN22 = cp.Parameter((self.ac_dim, self.ob_dim))
-        self.pLambda_p = cp.Parameter((self.plant_state_size, self.plant_state_size), diag = True)
+        self.pLambda_p = cp.Parameter((self.plant_nonlin_size, self.plant_nonlin_size), diag = True)
         self.pLambda_c = cp.Parameter((self.hidden_size, self.hidden_size), diag = True)
         self.pN12_h = cp.Parameter((self.plant_state_size, self.hidden_size))
         self.pN21_h = cp.Parameter((self.hidden_size, self.plant_state_size))
@@ -384,13 +386,13 @@ class NonlinProjector:
             )
             constraints2 = [
                 self.vLambda_p - self.eps * np.eye(self.vLambda_p.shape[0]) >> 0,
-                condition2 - self.eps * np.eye(condition2.shape[0]) >> 0
+                condition2 - 0.9*self.eps * np.eye(condition2.shape[0]) >> 0 # Mul eps by .9 because it made the problem solve...
             ]
             self.prob2 = cp.Problem(cp.Minimize(0), constraints2)
 
         # Initial Lambda_p value
         
-        self.pLambda_p.value = np.eye(self.plant_state_size)
+        self.pLambda_p.value = np.eye(self.pLambda_p.shape[0])
 
     def project(self, X, Y, N11, N12, N21, N22, Lambda_c, N12_h, N21_h, DK1_t, DK3_h, DK4_h):
         if self.rnn:
@@ -399,7 +401,7 @@ class NonlinProjector:
         # Check if input theta hat parameters are already within stabilizing set
         originals = [X,   Y,  N11,  N12,  N21,  N22,  Lambda_c,  N12_h,  N21_h,  DK1_t,  DK3_h,  DK4_h]
         if satisfy_lmi(originals, self.AG_t, self.BG2, self.CG1, self.eps, self.decay_factor,
-            nonlin = True, Lambda_p = self.pLambda_p.value.toarray(),
+            nonlin = True, Lambda_p = self.pLambda_p.value,
             BG1_t=self.BG1_t, CG2_t=self.CG2_t, DG3_t=self.DG3_t):
             return [None for _ in originals]
 
@@ -452,9 +454,7 @@ class NonlinProjector:
             self.pN12_h.value  = self.vN12_h.value
             self.pN21_h.value  = self.vN21_h.value
             self.pDK1_t.value  = self.vDK1_t.value
-            if self.rnn:
-                self.pDK3_h.value = self.vDK3_h
-            else:
+            if not self.rnn:
                 self.pDK3_h.value = self.vDK3_h.value
             self.pDK4_h.value  = self.vDK4_h.value
 
@@ -466,5 +466,7 @@ class NonlinProjector:
             print('REN Nonlin Update LambdaP Projection: Computed in: ', tf - t0, 'time')
 
             self.pLambda_p.value = self.vLambda_p.value.toarray()
+
+        print('lambda p', self.pLambda_p.value)
 
         return oX, oY, oN11, oN12, oN21, oN22, oLambda_c, oN12_h, oN21_h, oDK1_t, oDK3_h, oDK4_h

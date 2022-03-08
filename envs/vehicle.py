@@ -40,8 +40,9 @@ class VehicleLateralEnv(gym.Env):
 
         # maximum control input
         self.max_steering = np.pi/6 #* factor
+        self.soft_max_steering = self.max_steering / 4
 
-        self.time_max = 200
+        self.time_max = 30
 
         # continuous-time model
         Ac = np.array([
@@ -97,10 +98,8 @@ class VehicleLateralEnv(gym.Env):
         e, edot, etheta, ethetadot = self.state
 
         u = np.clip(u, -self.max_steering, self.max_steering)
-        costs = 0.01 * e**2 + 1/25.0 * edot**2 + etheta**2 + 1/25.0 * ethetadot**2 + 2.0/(np.pi/6.0)**2 * (u*self.factor)**2 - 5.0
-        # costs = 100*e**2 + 10*edot**2 + 100*etheta**2 + 10*ethetadot**2 + u**2 + 
-        # costs = (e - self.init_state[0])**2 - 5
-        # costs = np.array([costs])
+        # costs = 0.01 * e**2 + 1/25.0 * edot**2 + etheta**2 + 1/25.0 * ethetadot**2 + 2.0/(np.pi/6.0)**2 * (u*self.factor)**2 - 5.0
+        costs = 10*(np.max([0, np.abs(u[0]*self.factor)-self.soft_max_steering]) - self.max_steering*self.factor)
 
         self.state = self.AG @ self.state + self.BG @ u
 
@@ -110,7 +109,7 @@ class VehicleLateralEnv(gym.Env):
 
         self.time += 1
 
-        return self.get_obs(), -costs[0], terminated, {}
+        return self.get_obs(), -costs, terminated, {}
 
     def reset(self):
         high = np.array([1.0, 0.5, 0.1, 0.5], dtype=np.float32) * self.factor

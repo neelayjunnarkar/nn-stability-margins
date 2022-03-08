@@ -16,8 +16,9 @@ class PowergridEnv(gym.Env):
         # maximum control input
         self.control_scale = 1
         self.max_control = 1.0 * self.control_scale * 2
+        self.soft_max_control = self.max_control / 4
 
-        self.time_max = 200
+        self.time_max = 30
 
         # powergrid dynamics in Section IV-B of https://ieeexplore.ieee.org/stamp/stamp.jsp?arnumber=9296215
         M = np.diag([4.0000, 3.0000, 2.5000, 4.0000, 2.0000, 3.5000, 3.0000, 2.5000, 2.0000, 6.0000]).astype(np.float32)
@@ -79,8 +80,9 @@ class PowergridEnv(gym.Env):
 
     def step(self,u):
         u = np.clip(u, -self.max_control, self.max_control)
-        costs = 1/self.factor**2 * (np.linalg.norm(self.state, 2)**2 + 0.2 * np.linalg.norm(u / self.control_scale * self.factor, 2)**2) - 5.0
-
+        # costs = 1/self.factor**2 * (np.linalg.norm(self.state, 2)**2 + 0.2 * np.linalg.norm(u / self.control_scale * self.factor, 2)**2) - 5.0
+        costs = 10*(np.max([0, np.linalg.norm(u*self.factor, 2)-self.soft_max_control]) - self.max_control*self.factor)
+        
         self.state = self.AG @ self.state + self.BG @ u
 
         terminated = False

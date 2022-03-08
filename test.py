@@ -17,12 +17,13 @@ import os
 import math
 
 N_CPUS  = int(os.getenv('SLURM_CPUS_ON_NODE'))
-n_tasks = 1
+n_tasks = 3
 n_workers_per_task = int(math.floor(N_CPUS/n_tasks))-1-1
+# n_workers_per_task = 6
 
 print('==================Using ', n_workers_per_task, ' workers per task==========================')
 
-env = InvertedPendulumEnv
+env = CartpoleEnv
 env_config = {
     "observation": "partial",
     "normed": True,
@@ -36,7 +37,7 @@ config = {
     "env": env,
     "env_config": env_config,
     "model": {
-        "custom_model": ProjRNNModel,
+        "custom_model": tune.grid_search([ProjRENModel, ProjRNNModel, RNNModel]),
         "custom_model_config": {
             "state_size": 16, # tune.grid_search([2, 8, 16]), #2,
             "hidden_size": 16, #tune.choice([2, 16, 32]), # 16
@@ -107,10 +108,10 @@ results = tune.run(
     # fail_fast = True,
     verbose = 2,
     trial_name_creator = name_creator,
-    name = 'InvPend_BoundedActionReward_PPO',
+    name = 'Cartpole_BoundedActionReward_PPO',
     local_dir = '/global/scratch/users/neelayjunnarkar/ray_results',
+    # local_dir = '../ray_results',
     checkpoint_at_end = True,
-	
 )
 
 metric = "episode_reward_mean"

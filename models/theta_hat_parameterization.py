@@ -1,7 +1,7 @@
 import numpy as np
 import torch
 import torch.nn as nn
-from models.ren_projection import ren_project_nonlin, LinProjector, NonlinProjector
+from models.ren_projection import LinProjector, NonlinProjector
 from models.utils import uniform, to_numpy, from_numpy     
 
 class ThetaHatParameterization:

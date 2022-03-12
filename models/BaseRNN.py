@@ -1,3 +1,4 @@
+from http.client import PROXY_AUTHENTICATION_REQUIRED
 import torch
 import torch.nn as nn
 
@@ -17,9 +18,7 @@ class BaseRNN(RecurrentNetwork, nn.Module):
         name,
         state_size = None,
         hidden_size = None,
-        phi_cstor = nn.Tanh,
-        A_phi = torch.tensor(0),
-        B_phi = torch.tensor(1),
+        phi_cstor = None,
         log_std_init = None,
         nn_baseline_n_layers = 2,
         nn_baseline_size = 64,
@@ -29,6 +28,9 @@ class BaseRNN(RecurrentNetwork, nn.Module):
         assert state_size is not None, "state_size is None"
         assert hidden_size is not None, "hidden_size is None"
         assert log_std_init is not None, "log_std_init is None"
+        assert phi_cstor is not None, "phi_cstor is None"
+
+        print("BaseRNN: Ignoring the following arguments: ", _ignore_args)
 
         nn.Module.__init__(self)
         super().__init__(obs_space, action_space, num_outputs, model_config, name)
@@ -40,8 +42,8 @@ class BaseRNN(RecurrentNetwork, nn.Module):
 
         # Setup activation function and loop transformation variables
         self.phi = phi_cstor()
-        self.A_phi = A_phi
-        self.B_phi = B_phi
+        self.A_phi = self.phi.A_phi
+        self.B_phi = self.phi.B_phi
         assert self.A_phi.shape == self.B_phi.shape, "A_phi and B_phi must be the same size"
         self.S_phi = (self.A_phi + self.B_phi)/2
         if self.A_phi.ndim > 0:

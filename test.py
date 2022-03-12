@@ -4,26 +4,28 @@ from envs import CartpoleEnv, InvertedPendulumEnv, LinearizedInvertedPendulumEnv
 from models.RNN import RNNModel
 from models.ProjRNN import ProjRNNModel
 from models.ProjREN import ProjRENModel
+from models.ProjRNNOld import ProjRNNOldModel
 from ray.rllib.agents import ppo, pg
 import numpy as np
 from ray.tune.schedulers import ASHAScheduler
 import optuna
 from ray.tune.suggest.optuna import OptunaSearch
 from trainers import ProjectedPGTrainer, ProjectedPPOTrainer
+from activations import LeakyReLU, Tanh
 import torch
 import torch.nn as nn
 from deq_lib.solvers import broyden, anderson
 import os
 import math
 
-N_CPUS  = int(os.getenv('SLURM_CPUS_ON_NODE'))
-n_tasks = 3
-n_workers_per_task = int(math.floor(N_CPUS/n_tasks))-1-1
-# n_workers_per_task = 6
+# N_CPUS  = int(os.getenv('SLURM_CPUS_ON_NODE'))
+# n_tasks = 1
+# n_workers_per_task = int(math.floor(N_CPUS/n_tasks))-1-1
+n_workers_per_task = 6
 
 print('==================Using ', n_workers_per_task, ' workers per task==========================')
 
-env = CartpoleEnv
+env = InvertedPendulumEnv
 env_config = {
     "observation": "partial",
     "normed": True,
@@ -37,19 +39,18 @@ config = {
     "env": env,
     "env_config": env_config,
     "model": {
-        "custom_model": tune.grid_search([ProjRENModel, ProjRNNModel, RNNModel]),
+        "custom_model": ProjRENModel, # tune.grid_search([ProjRENModel, ProjRNNModel, ProjRNNOldModel]),
         "custom_model_config": {
-            "state_size": 16, # tune.grid_search([2, 8, 16]), #2,
-            "hidden_size": 16, #tune.choice([2, 16, 32]), # 16
-            "phi_cstor": nn.Tanh,
-            "A_phi": torch.tensor(0),
-            "B_phi": torch.tensor(1),
+            "state_size": 2, # tune.grid_search([2, 8, 16]), #2,
+            "hidden_size": 1, #tune.choice([2, 16, 32]), # 16
+            # "phi_cstor": Tanh,
+            "phi_cstor": LeakyReLU,
             "log_std_init": np.log(0.2), # tune.uniform(np.log(0.01), np.log(2)), # np.log(0.2),
             "nn_baseline_n_layers": 2,
             "nn_baseline_size": 64,
             # Projecting controller parameters
             "lmi_eps": 1e-3,
-            "exp_stability_rate": 0.98,
+            "exp_stability_rate": 0.99,
             "plant_cstor": env,
             "plant_config": env_config,
             # REN parameters
@@ -70,29 +71,23 @@ config = {
     # Only for evaluation runs, render the env.
     "evaluation_config": {
         "render_env": False,
+        "explore": False
     },
     "evaluation_interval": 1,
     "evaluation_parallel_to_training": True
 }
 
+print('============ Config ==============')
+print(config)
+print('==================================')
+
 
 ray.init()
 
-optuna_search = OptunaSearch(metric="episode_reward_mean", mode="max")
-
-asha_scheduler = ASHAScheduler(
-    time_attr='training_iteration',
-    metric='episode_reward_mean',
-    mode='max',
-    max_t=1000,
-    grace_period=200,
-    reduction_factor=3,
-    brackets=1
-)
-
 def name_creator(trial):
     config = trial.config
-    name = f"{config['model']['custom_model'].__name__}_{config['env'].__name__}"
+    model_cfg = config['model']['custom_model_config']
+    name = f"{config['model']['custom_model'].__name__}_{config['env'].__name__}_state{model_cfg['state_size']}_hidden{model_cfg['hidden_size']}"
     return name
 
 results = tune.run(
@@ -100,7 +95,7 @@ results = tune.run(
     config = config,
     stop = {
         # "episode_reward_mean": 990,
-        "training_iteration": 1000
+        "training_iteration": 100
     },
     # num_samples = 3,
     # search_alg = optuna_search,
@@ -108,9 +103,10 @@ results = tune.run(
     # fail_fast = True,
     verbose = 2,
     trial_name_creator = name_creator,
-    name = 'Cartpole_BoundedActionReward_PPO',
-    local_dir = '/global/scratch/users/neelayjunnarkar/ray_results',
-    # local_dir = '../ray_results',
+    # name = 'BoundedActionReward_PPO',
+    name = 'scratch',
+    # local_dir = '/global/scratch/users/neelayjunnarkar/ray_results',
+    local_dir = '../ray_results',
     checkpoint_at_end = True,
 )
 
@@ -124,6 +120,17 @@ print(
 
 print('best config: ', results.get_best_config(metric=metric, mode="max"))
 
+# optuna_search = OptunaSearch(metric="episode_reward_mean", mode="max")
+
+# asha_scheduler = ASHAScheduler(
+#     time_attr='training_iteration',
+#     metric='episode_reward_mean',
+#     mode='max',
+#     max_t=1000,
+#     grace_period=200,
+#     reduction_factor=3,
+#     brackets=1
+# )
 # ray.init()
 # trainer = ProjectedPGTrainer(env=config["model"]["custom_model_config"]["plant_cstor"], config=config)
 # trainer = ProjectedPPOTrainer(env=config["model"]["custom_model_config"]["plant_cstor"], config=config)

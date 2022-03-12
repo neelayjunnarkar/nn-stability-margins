@@ -4,12 +4,11 @@ from envs import CartpoleEnv, InvertedPendulumEnv, LinearizedInvertedPendulumEnv
 from models.RNN import RNNModel
 from models.ProjRNN import ProjRNNModel
 from models.ProjREN import ProjRENModel
+from models.ProjRNNOld import ProjRNNOldModel
 from ray.rllib.agents import ppo, pg
 import numpy as np
-from ray.tune.schedulers import ASHAScheduler
-import optuna
-from ray.tune.suggest.optuna import OptunaSearch
 from trainers import ProjectedPGTrainer, ProjectedPPOTrainer
+from activations import LeakyReLU, Tanh
 import torch
 import torch.nn as nn
 from deq_lib.solvers import broyden, anderson
@@ -29,11 +28,13 @@ env_map = {
 model_map = {
     "<class 'models.ProjREN.ProjRENModel'>": ProjRENModel,
     "<class 'models.ProjRNN.ProjRNNModel'>": ProjRNNModel,
-    "<class 'models.RNN.RNNModel'>": RNNModel
+    "<class 'models.RNN.RNNModel'>": RNNModel,
+    "<class 'models.ProjRNNOld.ProjRNNOldModel'>": ProjRNNOldModel,
 }
 
 phi_map = {
-    "<class 'torch.nn.modules.activation.Tanh'>": nn.Tanh
+    "<class 'activations.LeakyReLU'>": LeakyReLU,
+    "<class 'activations.Tanh'>": Tanh,
 }
 
 def load_agent(directory, checkpoint_path = None):
@@ -47,12 +48,7 @@ def load_agent(directory, checkpoint_path = None):
     config['model']['custom_model_config']['plant_cstor'] = config['env']
     config['model']['custom_model'] = model_map[config['model']['custom_model']]
 
-    if config['model']['custom_model_config']['phi_cstor'] == "<class 'torch.nn.modules.activation.Tanh'>":
-        config['model']['custom_model_config']['phi_cstor'] = nn.Tanh
-        config['model']['custom_model_config']['A_phi'] = torch.tensor(0)
-        config['model']['custom_model_config']['B_phi'] = torch.tensor(1)
-    else:
-        assert 'Error'
+    config['model']['custom_model_config']['phi_cstor'] = phi_map[config['model']['custom_model_config']['phi_cstor']]
 
     if 'broyden' in config['model']['custom_model_config']['solver']:
         config['model']['custom_model_config']['solver'] = broyden
@@ -88,7 +84,7 @@ def compute_rollout(agent, env, init_obs):
         rewards.append(rew)
         prev_rew = rew
         n_steps += 1
-    if n_steps < 30:
+    if n_steps < env.time_max+1:
         print('failure', agent.__name__)
 
     states = np.stack(states).T
@@ -102,13 +98,22 @@ def compute_rollout(agent, env, init_obs):
 # ren_dir = '../ray_results/InvPend_BoundedActionReward_ShortRollout_PPO/ProjRENModel_InvertedPendulumEnv_0_2022-03-07_13-47-48'
 # rnn_dir = '../ray_results/InvPend_BoundedActionReward_ShortRollout_PPO/ProjRNNModel_InvertedPendulumEnv_0_2022-03-07_13-45-25'
 
-ren_dir = '../ray_results/scratch/ProjRENModel_InvertedPendulumEnv_0_2022-03-07_23-34-32'
-rnn_dir = '../ray_results/scratch/ProjRNNModel_InvertedPendulumEnv_0_2022-03-07_23-17-20'
+# ren_dir = '../ray_results/scratch/ProjRENModel_InvertedPendulumEnv_0_2022-03-07_23-34-32' # checkpoint_path=ren_dir + '/checkpoint_000010/checkpoint-10'
+# rnn_dir = '../ray_results/scratch/ProjRNNModel_InvertedPendulumEnv_0_2022-03-07_23-17-20' # checkpoint_path=rnn_dir + '/checkpoint_000100/checkpoint-100'
 
-ren_agent, _ = load_agent(ren_dir, checkpoint_path=ren_dir + '/checkpoint_000010/checkpoint-10')
-rnn_agent, env = load_agent(rnn_dir, checkpoint_path=rnn_dir + '/checkpoint_000100/checkpoint-100')
+# ren_dir = '../ray_results/Vehicle_BoundedActionReward_PPO/ProjRENModel_VehicleLateralEnv_2022-03-08_00-06-53'
+# rnn_dir = '../ray_results/Vehicle_BoundedActionReward_PPO/ProjRNNModel_VehicleLateralEnv_2022-03-08_00-07-05'
 
-N_iters = 3
+ren_dir = '../ray_results/BoundedActionReward_PPO/ProjRENModel_InvertedPendulumEnv_state2_hidden1_0_2022-03-11_12-36-41'
+rnn_dir = '../ray_results/BoundedActionReward_PPO/ProjRNNModel_InvertedPendulumEnv_state2_hidden1_0_2022-03-11_12-37-15'
+
+ren_dir = '../ray_results/scratch/ProjRNNModel_InvertedPendulumEnv_state2_hidden1_0_2022-03-11_22-25-33'
+rnn_dir = '../ray_results/scratch/ProjRENModel_InvertedPendulumEnv_state2_hidden1_0_2022-03-11_22-28-53'
+
+ren_agent, _ = load_agent(ren_dir, checkpoint_path=ren_dir + '/checkpoint_000100/checkpoint-100')
+rnn_agent, env = load_agent(rnn_dir, checkpoint_path=rnn_dir + '/checkpoint_000100/checkpoint-100')#, checkpoint_path=rnn_dir + '/checkpoint_000010/checkpoint-10')
+
+N_iters = 5
 ren_states = []
 ren_actions = []
 rnn_states = []
@@ -127,6 +132,7 @@ for _ in range(N_iters):
     rnn_actions.append(rnn_action)
 
 
+# bounds = [env.soft_max_steering for _ in range(env.time_max+1)]
 bounds = [env.soft_max_torque for _ in range(env.time_max+1)]
 
 plt.figure()

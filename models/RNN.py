@@ -1,11 +1,7 @@
-
-from ray.rllib.models.modelv2 import ModelV2
-from ray.rllib.models.preprocessors import get_preprocessor
-from ray.rllib.models.torch.recurrent_net import RecurrentNetwork
 from ray.rllib.utils.annotations import override
 import torch
 import torch.nn as nn
-from models.utils import build_mlp, uniform
+from models.utils import uniform
 from models.BaseRNN import BaseRNN
 
 class RNNModel(BaseRNN):

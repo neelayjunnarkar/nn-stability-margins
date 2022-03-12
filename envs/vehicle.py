@@ -40,7 +40,7 @@ class VehicleLateralEnv(gym.Env):
 
         # maximum control input
         self.max_steering = np.pi/6 #* factor
-        self.soft_max_steering = self.max_steering / 4
+        self.soft_max_steering = self.max_steering / 16
 
         self.time_max = 30
 

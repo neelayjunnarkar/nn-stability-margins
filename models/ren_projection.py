@@ -2,86 +2,6 @@ import numpy as np
 import cvxpy as cp
 import time
 
-
-def ren_project_nonlin(X, Y, N11, N12, N21, N22, Lambda_p, Lambda_c, N12_h, N21_h, DK1_t, DK3_h, DK4_h, \
-        AG_t, BG1_t, BG2, CG1, CG2_t, DG3_t, **kwargs):
-    return ren_project(X, Y, N11, N12, N21, N22, Lambda_c, N12_h, N21_h, DK1_t, DK3_h, DK4_h, \
-        AG_t, BG2, CG1, nonlin = True, Lambda_p = Lambda_p, BG1_t = BG1_t, CG2_t = CG2_t, DG3_t = DG3_t, **kwargs)
-
-def ren_project(X, Y, N11, N12, N21, N22, Lambda_c, N12_h, N21_h, DK1_t, DK3_h, DK4_h, AG_t, BG2, CG1, \
-                nonlin = False, Lambda_p = False, BG1_t = None, CG2_t = None, DG3_t = None, \
-                eps = 0.01, rnn = False, decay_factor=0.98, ):
-    # All inputs in numpy
-    # This section will use variable terminology of the REN (so DK3 and DK4 both exist)
-    # If rnn is true, DK3 will be set to 0.
-
-    # When plant is linear then AG_t = AG, BG2 = BG, CG1 = CG
-
-    if rnn:
-        DK3_h = np.zeros_like(Lambda_c)
-    
-    originals = [X,   Y,  N11,  N12,  N21,  N22,  Lambda_c,  N12_h,  N21_h,  DK1_t,  DK3_h,  DK4_h]
-    if satisfy_lmi(originals, AG_t, BG2, CG1, eps, decay_factor, \
-            nonlin = nonlin, Lambda_p = Lambda_p, BG1_t = BG1_t, CG2_t = CG2_t, DG3_t = DG3_t):
-        return [None for _ in originals]
-
-    vX = cp.Variable(X.shape, symmetric = True)
-    vY = cp.Variable(Y.shape, symmetric = True)
-    vN11 = cp.Variable(N11.shape)
-    vN12 = cp.Variable(N12.shape)
-    vN21 = cp.Variable(N21.shape)
-    vN22 = cp.Variable(N22.shape)
-    vLambda_c = cp.Variable(Lambda_c.shape, diag = True)
-    vN12_h = cp.Variable(N12_h.shape)
-    vN21_h = cp.Variable(N21_h.shape)
-    vDK1_t = cp.Variable(DK1_t.shape)
-    if rnn:
-        vDK3_h = np.zeros_like(Lambda_c)
-    else:
-        vDK3_h = cp.Variable(DK3_h.shape)
-    vDK4_h = cp.Variable(DK4_h.shape)
-
-    variables = [vX, vY, vN11, vN12, vN21, vN22, vLambda_c, vN12_h, vN21_h, vDK1_t, vDK3_h, vDK4_h]
-
-    condition = construct_condition(variables, AG_t, BG2, CG1, decay_factor, \
-        nonlin = nonlin, Lambda_p = Lambda_p, BG1_t = BG1_t, CG2_t = CG2_t, DG3_t = DG3_t)
-    
-    constraints = [
-        vX - eps*np.eye(vX.shape[0]) >> 0, # X positive definite
-        vY - eps*np.eye(vY.shape[0]) >> 0, # Y positive definite
-        vLambda_c - eps*np.eye(vLambda_c.shape[0]) >> 0, # Lambda positive definite
-        condition - eps*np.eye(condition.shape[0]) >> 0 # LMI condition holds
-    ]
-
-    obj = sum([cp.sum_squares(var - vVar) for (var, vVar) in zip(originals, variables)])
-
-    prob = cp.Problem(cp.Minimize(obj), constraints)
-    t0 = time.process_time()
-    prob.solve(solver = cp.MOSEK)
-    tf = time.process_time()
-    print('Projection: Objective value: ', prob.value)
-    print('Projection: Computed in: ', tf - t0, 'time')
-
-    oX   = vX.value
-    oY   = vY.value
-    oN11 = vN11.value
-    oN12 = vN12.value
-    oN21 = vN21.value
-    oN22 = vN22.value
-    oLambda_c = vLambda_c.value.toarray() # Needs 'toarray' since is a sparse matrix (because diagonal
-    oN12_h  = vN12_h.value
-    oN21_h  = vN21_h.value
-    oDK1_t  = vDK1_t.value
-    if rnn:
-        oDK3_h = np.zeros_like(Lambda_c)
-    else:
-        oDK3_h  = vDK3_h.value
-    oDK4_h  = vDK4_h.value
-
-    print(f'REN proj: orig 2 DK3: {np.linalg.norm(np.linalg.inv(Lambda_c) @ DK3_h, 2)} to {np.linalg.norm(np.linalg.inv(oLambda_c) @ oDK3_h, 2)}')
-
-    return oX, oY, oN11, oN12, oN21, oN22, oLambda_c, oN12_h, oN21_h, oDK1_t, oDK3_h, oDK4_h
-
 def satisfy_lmi(variables, AG_t, BG2, CG1, eps, decay_factor, \
         nonlin = False, Lambda_p = None, BG1_t = None, CG2_t = None, DG3_t = None):
     
@@ -142,9 +62,6 @@ def construct_condition(variables, AG_t, BG2, CG1, decay_factor, stacker = 'cvxp
 
     block_11 = stacker([[decay_factor**2 * ytpy, np.zeros((ytpy.shape[1], Lambda.shape[0]))], \
         [np.zeros((Lambda.shape[1], ytpy.shape[0])), Lambda]])
-
-    # block_22 = stacker([[ytpy, np.zeros((ytpy.shape[1], Lambda_c.shape[0]))], \
-    #     [np.zeros((Lambda_c.shape[1], ytpy.shape[0])), Lambda_c]])
 
     block_22 = stacker([[ytpy, np.zeros((ytpy.shape[1], Lambda.shape[0]))], \
         [np.zeros((Lambda.shape[1], ytpy.shape[0])), Lambda]])
@@ -237,9 +154,9 @@ class LinProjector:
         condition = construct_condition(variables, self.AG, self.BG, self.CG, self.decay_factor)
 
         constraints = [
-            self.vX - self.eps*np.eye(self.vX.shape[0]) >> 0, # X positive definite
-            self.vY - self.eps*np.eye(self.vY.shape[0]) >> 0, # Y positive definite
-            self.vLambda_c - self.eps*np.eye(self.vLambda_c.shape[0]) >> 0, # Lambda positive definite
+            # self.vX - self.eps*np.eye(self.vX.shape[0]) >> 0, # X positive definite
+            # self.vY - self.eps*np.eye(self.vY.shape[0]) >> 0, # Y positive definite
+            # self.vLambda_c - self.eps*np.eye(self.vLambda_c.shape[0]) >> 0, # Lambda positive definite
             condition - self.eps*np.eye(condition.shape[0]) >> 0 # LMI condition holds
         ]
 
@@ -269,11 +186,11 @@ class LinProjector:
             self.pDK3_h.value = DK3_h
         self.pDK4_h.value = DK4_h
 
-        t0 = time.process_time()
+        t0 = time.time()
         self.prob.solve(solver = cp.MOSEK)
-        tf = time.process_time()
+        tf = time.time()
         print('REN Lin Projection: Objective value: ', self.prob.value)
-        print('REN Lin Projection: Computed in: ', tf - t0, 'time')
+        print('REN Lin Projection: Computed in: ', tf - t0, 'seconds')
 
         oX   = self.vX.value
         oY   = self.vY.value
@@ -290,6 +207,8 @@ class LinProjector:
         else:
             oDK3_h  = self.vDK3_h.value
         oDK4_h  = self.vDK4_h.value
+
+        assert np.allclose(oDK3_h, np.zeros_like(oDK3_h)), "REN Lin Projection: Output DK3_h is nonzero"
 
         return oX, oY, oN11, oN12, oN21, oN22, oLambda_c, oN12_h, oN21_h, oDK1_t, oDK3_h, oDK4_h
 
@@ -365,9 +284,9 @@ class NonlinProjector:
         )
 
         constraints = [
-            self.vX - self.eps * np.eye(self.vX.shape[0]) >> 0,
-            self.vY - self.eps * np.eye(self.vY.shape[0]) >> 0,
-            self.vLambda_c - self.eps * np.eye(self.vLambda_c.shape[0]) >> 0,
+            # self.vX - self.eps * np.eye(self.vX.shape[0]) >> 0,
+            # self.vY - self.eps * np.eye(self.vY.shape[0]) >> 0,
+            # self.vLambda_c - self.eps * np.eye(self.vLambda_c.shape[0]) >> 0,
             condition - self.eps * np.eye(condition.shape[0]) >> 0
         ]
 
@@ -385,8 +304,8 @@ class NonlinProjector:
                 BG1_t = self.BG1_t, CG2_t = self.CG2_t, DG3_t = self.DG3_t
             )
             constraints2 = [
-                self.vLambda_p - self.eps * np.eye(self.vLambda_p.shape[0]) >> 0,
-                condition2 - 0.9*self.eps * np.eye(condition2.shape[0]) >> 0 # Mul eps by .9 because it made the problem solve...
+                # self.vLambda_p - self.eps * np.eye(self.vLambda_p.shape[0]) >> 0,
+                condition2 - 0.99*self.eps * np.eye(condition2.shape[0]) >> 0 # Mul eps by .9 because it made the problem solve...
             ]
             self.prob2 = cp.Problem(cp.Minimize(0), constraints2)
 
@@ -420,11 +339,11 @@ class NonlinProjector:
             self.pDK3_h.value = DK3_h
         self.pDK4_h.value = DK4_h
 
-        t0 = time.process_time()
+        t0 = time.time()
         self.prob1.solve(solver = cp.MOSEK)
-        tf = time.process_time()
+        tf = time.time()
         print('REN Nonlin Projection: Objective value: ', self.prob1.value)
-        print('REN Nonlin Projection: Computed in: ', tf - t0, 'time')
+        print('REN Nonlin Projection: Computed in: ', tf - t0, 'seconds')
 
         oX   = self.vX.value
         oY   = self.vY.value
@@ -459,14 +378,21 @@ class NonlinProjector:
             self.pDK4_h.value  = self.vDK4_h.value
 
 
-            t0 = time.process_time()
+            t0 = time.time()
             self.prob2.solve(solver = cp.MOSEK)
-            tf = time.process_time()
+            tf = time.time()
             print('REN Nonlin Update LambdaP Projection: Objective value: ', self.prob2.value)
-            print('REN Nonlin Update LambdaP Projection: Computed in: ', tf - t0, 'time')
+            print('REN Nonlin Update LambdaP Projection: Computed in: ', tf - t0, 'seconds')
 
             self.pLambda_p.value = self.vLambda_p.value.toarray()
 
-        print('lambda p', self.pLambda_p.value)
+        print('REN Nonlin Projection: Lambda P', self.pLambda_p.value)
+        print(f'REN Nonlin Projection: DK3_t max sing val: {np.linalg.norm(np.linalg.inv(Lambda_c) @ DK3_h, 2)} to {np.linalg.norm(np.linalg.inv(oLambda_c) @ oDK3_h, 2)}')
 
+        t0 = time.time()
+        assert satisfy_lmi([oX, oY, oN11, oN12, oN21, oN22, oLambda_c, oN12_h, oN21_h, oDK1_t, oDK3_h, oDK4_h], self.AG_t, self.BG2, self.CG1, self.eps, self.decay_factor,
+            nonlin = True, Lambda_p = self.pLambda_p.value,
+            BG1_t=self.BG1_t, CG2_t=self.CG2_t, DG3_t=self.DG3_t), "Output does not satisfy LMI"
+        tf = time.time()
+        print(f'Checking result took {tf-t0} seconds')
         return oX, oY, oN11, oN12, oN21, oN22, oLambda_c, oN12_h, oN21_h, oDK1_t, oDK3_h, oDK4_h

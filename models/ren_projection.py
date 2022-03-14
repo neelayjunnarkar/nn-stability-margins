@@ -39,7 +39,7 @@ def satisfy_lmi(variables, AG_t, BG2, CG1, eps, decay_factor, \
         print('REN proj: satisfy lmi: condition not PD')
         return False
 
-    print('REN proj: satisfy lmi: curr params satisfy lmi')
+    # print('REN proj: satisfy lmi: curr params satisfy lmi')
     return True
 
 def construct_condition(variables, AG_t, BG2, CG1, decay_factor, stacker = 'cvxpy', \
@@ -113,8 +113,8 @@ class LinProjector:
         self.BG = BG
         self.CG = CG
 
-        self.pX   = cp.Parameter((self.plant_state_size, self.plant_state_size), symmetric = True)
-        self.pY   = cp.Parameter((self.plant_state_size, self.plant_state_size), symmetric = True)
+        self.pX   = cp.Parameter((self.plant_state_size, self.plant_state_size), PSD = True)
+        self.pY   = cp.Parameter((self.plant_state_size, self.plant_state_size), PSD = True)
         self.pN11 = cp.Parameter((self.plant_state_size, self.plant_state_size))
         self.pN12 = cp.Parameter((self.plant_state_size, self.ob_dim))
         self.pN21 = cp.Parameter((self.ac_dim, self.plant_state_size))
@@ -132,8 +132,8 @@ class LinProjector:
         obj_params = [self.pX, self.pY, self.pN11, self.pN12, self.pN21, self.pN22, 
             self.pLambda_c, self.pN12_h, self.pN21_h, self.pDK1_t, self.pDK3_h, self.pDK4_h]
 
-        self.vX = cp.Variable(self.pX.shape, symmetric = True)
-        self.vY = cp.Variable(self.pY.shape, symmetric = True)
+        self.vX = cp.Variable(self.pX.shape, PSD = True)
+        self.vY = cp.Variable(self.pY.shape, PSD = True)
         self.vN11 = cp.Variable(self.pN11.shape)
         self.vN12 = cp.Variable(self.pN12.shape)
         self.vN21 = cp.Variable(self.pN21.shape)
@@ -170,6 +170,7 @@ class LinProjector:
 
         originals = [X,   Y,  N11,  N12,  N21,  N22,  Lambda_c,  N12_h,  N21_h,  DK1_t,  DK3_h,  DK4_h]
         if satisfy_lmi(originals, self.AG, self.BG, self.CG, self.eps, self.decay_factor):
+            print(f'RNN Nonlin Projection: DK3_t max sing val (sat cond): {np.linalg.norm(np.linalg.inv(Lambda_c) @ DK3_h, 2)}')
             return [None for _ in originals]
 
         self.pX.value = X
@@ -189,8 +190,8 @@ class LinProjector:
         t0 = time.time()
         self.prob.solve(solver = cp.MOSEK)
         tf = time.time()
-        print('REN Lin Projection: Objective value: ', self.prob.value)
-        print('REN Lin Projection: Computed in: ', tf - t0, 'seconds')
+        # print('Lin Projection: Objective value: ', self.prob.value)
+        # print('Lin Projection: Computed in: ', tf - t0, 'seconds')
 
         oX   = self.vX.value
         oY   = self.vY.value
@@ -208,7 +209,11 @@ class LinProjector:
             oDK3_h  = self.vDK3_h.value
         oDK4_h  = self.vDK4_h.value
 
-        assert np.allclose(oDK3_h, np.zeros_like(oDK3_h)), "REN Lin Projection: Output DK3_h is nonzero"
+        if self.rnn:
+            assert np.allclose(oDK3_h, np.zeros_like(oDK3_h)), "RNN Lin Projection: Output DK3_h is nonzero"
+        else:
+            print(f'RNN Lin Projection: DK3_t max sing val: {np.linalg.norm(np.linalg.inv(Lambda_c) @ DK3_h, 2)} to {np.linalg.norm(np.linalg.inv(oLambda_c) @ oDK3_h, 2)}')
+
 
         return oX, oY, oN11, oN12, oN21, oN22, oLambda_c, oN12_h, oN21_h, oDK1_t, oDK3_h, oDK4_h
 
@@ -238,8 +243,8 @@ class NonlinProjector:
 
         # Setting up problem 1 to project theta hat
 
-        self.pX   = cp.Parameter((self.plant_state_size, self.plant_state_size), symmetric = True)
-        self.pY   = cp.Parameter((self.plant_state_size, self.plant_state_size), symmetric = True)
+        self.pX   = cp.Parameter((self.plant_state_size, self.plant_state_size), PSD = True)
+        self.pY   = cp.Parameter((self.plant_state_size, self.plant_state_size), PSD = True)
         self.pN11 = cp.Parameter((self.plant_state_size, self.plant_state_size))
         self.pN12 = cp.Parameter((self.plant_state_size, self.ob_dim))
         self.pN21 = cp.Parameter((self.ac_dim, self.plant_state_size))
@@ -258,8 +263,8 @@ class NonlinProjector:
         obj_params = [self.pX, self.pY, self.pN11, self.pN12, self.pN21, self.pN22, 
             self.pLambda_c, self.pN12_h, self.pN21_h, self.pDK1_t, self.pDK3_h, self.pDK4_h]
 
-        self.vX = cp.Variable(self.pX.shape, symmetric = True)
-        self.vY = cp.Variable(self.pY.shape, symmetric = True)
+        self.vX = cp.Variable(self.pX.shape, PSD = True)
+        self.vY = cp.Variable(self.pY.shape, PSD = True)
         self.vN11 = cp.Variable(self.pN11.shape)
         self.vN12 = cp.Variable(self.pN12.shape)
         self.vN21 = cp.Variable(self.pN21.shape)
@@ -322,6 +327,7 @@ class NonlinProjector:
         if satisfy_lmi(originals, self.AG_t, self.BG2, self.CG1, self.eps, self.decay_factor,
             nonlin = True, Lambda_p = self.pLambda_p.value,
             BG1_t=self.BG1_t, CG2_t=self.CG2_t, DG3_t=self.DG3_t):
+            print(f'RNN Nonlin Projection: DK3_t max sing val (sat cond): {np.linalg.norm(np.linalg.inv(Lambda_c) @ DK3_h, 2)}')
             return [None for _ in originals]
 
         # Project theta hat to stabilizing set.
@@ -342,8 +348,8 @@ class NonlinProjector:
         t0 = time.time()
         self.prob1.solve(solver = cp.MOSEK)
         tf = time.time()
-        print('REN Nonlin Projection: Objective value: ', self.prob1.value)
-        print('REN Nonlin Projection: Computed in: ', tf - t0, 'seconds')
+        # print('Nonlin Projection: Objective value: ', self.prob1.value)
+        # print('Nonlin Projection: Computed in: ', tf - t0, 'seconds')
 
         oX   = self.vX.value
         oY   = self.vY.value
@@ -381,18 +387,18 @@ class NonlinProjector:
             t0 = time.time()
             self.prob2.solve(solver = cp.MOSEK)
             tf = time.time()
-            print('REN Nonlin Update LambdaP Projection: Objective value: ', self.prob2.value)
-            print('REN Nonlin Update LambdaP Projection: Computed in: ', tf - t0, 'seconds')
+            # print('RNN Nonlin Update LambdaP Projection: Objective value: ', self.prob2.value)
+            # print('RNN Nonlin Update LambdaP Projection: Computed in: ', tf - t0, 'seconds')
 
             self.pLambda_p.value = self.vLambda_p.value.toarray()
 
-        print('REN Nonlin Projection: Lambda P', self.pLambda_p.value)
-        print(f'REN Nonlin Projection: DK3_t max sing val: {np.linalg.norm(np.linalg.inv(Lambda_c) @ DK3_h, 2)} to {np.linalg.norm(np.linalg.inv(oLambda_c) @ oDK3_h, 2)}')
+        # print('RNN Nonlin Projection: Lambda P', self.pLambda_p.value)
+        print(f'RNN Nonlin Projection: DK3_t max sing val: {np.linalg.norm(np.linalg.inv(Lambda_c) @ DK3_h, 2)} to {np.linalg.norm(np.linalg.inv(oLambda_c) @ oDK3_h, 2)}')
 
         t0 = time.time()
         assert satisfy_lmi([oX, oY, oN11, oN12, oN21, oN22, oLambda_c, oN12_h, oN21_h, oDK1_t, oDK3_h, oDK4_h], self.AG_t, self.BG2, self.CG1, self.eps, self.decay_factor,
             nonlin = True, Lambda_p = self.pLambda_p.value,
             BG1_t=self.BG1_t, CG2_t=self.CG2_t, DG3_t=self.DG3_t), "Output does not satisfy LMI"
         tf = time.time()
-        print(f'Checking result took {tf-t0} seconds')
+        # print(f'Checking result took {tf-t0} seconds')
         return oX, oY, oN11, oN12, oN21, oN22, oLambda_c, oN12_h, oN21_h, oDK1_t, oDK3_h, oDK4_h

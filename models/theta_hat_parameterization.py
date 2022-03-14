@@ -44,21 +44,26 @@ class ThetaHatParameterization:
             self.CG1  = from_numpy(plant.CG)
         
         #_T for transpose, _t for tilde, _h for hat
-        self.X_cstor  = nn.Parameter(uniform(self.plant_state_size, self.plant_state_size)/2)
-        self.Y_cstor  = nn.Parameter(uniform(self.plant_state_size, self.plant_state_size)/2)
+        X_cstor = uniform(self.plant_state_size, self.plant_state_size)
+        X_cstor = X_cstor.t() @ X_cstor
+        self.X_cstor  = nn.Parameter(X_cstor/2.0)
+        Y_cstor = uniform(self.plant_state_size, self.plant_state_size)
+        Y_cstor = Y_cstor.t() @ Y_cstor
+        self.Y_cstor  = nn.Parameter(Y_cstor/2.0)
         self.N11 = nn.Parameter(uniform(self.plant_state_size, self.plant_state_size))
         self.N12 = nn.Parameter(uniform(self.plant_state_size, ob_dim))
         self.N21 = nn.Parameter(uniform(ac_dim, self.plant_state_size))
         self.N22 = nn.Parameter(uniform(ac_dim, ob_dim))
-        self.Lambda_c_vec = nn.Parameter(torch.rand(hidden_size)) # Must be positive
+        self.Lambda_c_vec = nn.Parameter(torch.rand(hidden_size) + 1e-5)
         self.N12_h = nn.Parameter(uniform(self.plant_state_size, hidden_size))
         self.N21_h = nn.Parameter(uniform(hidden_size, self.plant_state_size))
         self.DK1_t = nn.Parameter(uniform(ac_dim, hidden_size))
         if self.rnn:
             self.DK3_h = torch.zeros(hidden_size, hidden_size)
         else:
-            DK3_h_cstor = uniform(hidden_size, hidden_size)
-            DK3_h_cstor /= 4*torch.max(torch.abs(torch.linalg.eigvals(DK3_h_cstor)))
+            # DK3_h_cstor = uniform(hidden_size, hidden_size)
+            # DK3_h_cstor /= 4*torch.max(torch.abs(torch.linalg.eigvals(DK3_h_cstor)))
+            DK3_h_cstor = torch.zeros(hidden_size, hidden_size)
             self.DK3_h = nn.Parameter(DK3_h_cstor)
         self.DK4_h = nn.Parameter(uniform(hidden_size, ob_dim))
 

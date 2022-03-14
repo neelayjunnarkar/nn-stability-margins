@@ -18,10 +18,12 @@ from deq_lib.solvers import broyden, anderson
 import os
 import math
 
-# N_CPUS  = int(os.getenv('SLURM_CPUS_ON_NODE'))
-# n_tasks = 1
-# n_workers_per_task = int(math.floor(N_CPUS/n_tasks))-1-1
-n_workers_per_task = 6
+# N_CPUS = 8 # laptop
+N_CPUS  = int(os.getenv('SLURM_CPUS_ON_NODE'))
+n_tasks = 4
+n_workers_per_task = int(math.floor(N_CPUS/n_tasks))-1-1
+
+# n_workers_per_task = 1
 
 print('==================Using ', n_workers_per_task, ' workers per task==========================')
 
@@ -39,18 +41,17 @@ config = {
     "env": env,
     "env_config": env_config,
     "model": {
-        "custom_model": ProjRENModel, # tune.grid_search([ProjRENModel, ProjRNNModel, ProjRNNOldModel]),
+        "custom_model": tune.grid_search([ProjRNNModel, ProjRENModel]), #tune.grid_search([ProjRENModel, ProjRNNModel, ProjRNNOldModel]),
         "custom_model_config": {
-            "state_size": 2, # tune.grid_search([2, 8, 16]), #2,
-            "hidden_size": 1, #tune.choice([2, 16, 32]), # 16
-            # "phi_cstor": Tanh,
-            "phi_cstor": LeakyReLU,
-            "log_std_init": np.log(0.2), # tune.uniform(np.log(0.01), np.log(2)), # np.log(0.2),
+            "state_size": 2,
+            "hidden_size": 1,
+            "phi_cstor": tune.grid_search([Tanh, LeakyReLU]),
+            "log_std_init": np.log(0.2),
             "nn_baseline_n_layers": 2,
             "nn_baseline_size": 64,
             # Projecting controller parameters
-            "lmi_eps": 1e-3,
-            "exp_stability_rate": 0.99,
+            "lmi_eps": 1e-5,
+            "exp_stability_rate": 0.9,
             "plant_cstor": env,
             "plant_config": env_config,
             # REN parameters
@@ -87,15 +88,15 @@ ray.init()
 def name_creator(trial):
     config = trial.config
     model_cfg = config['model']['custom_model_config']
-    name = f"{config['model']['custom_model'].__name__}_{config['env'].__name__}_state{model_cfg['state_size']}_hidden{model_cfg['hidden_size']}"
+    name = f"{config['model']['custom_model'].__name__}_{config['env'].__name__}_phi{model_cfg['phi_cstor'].__name__}_state{model_cfg['state_size']}_hidden{model_cfg['hidden_size']}"
     return name
 
 results = tune.run(
     ProjectedPPOTrainer,
     config = config,
     stop = {
-        # "episode_reward_mean": 990,
-        "training_iteration": 100
+        # "training_iteration": 200,
+        'agent_timesteps_total': 2.5e6,
     },
     # num_samples = 3,
     # search_alg = optuna_search,
@@ -103,10 +104,10 @@ results = tune.run(
     # fail_fast = True,
     verbose = 2,
     trial_name_creator = name_creator,
-    # name = 'BoundedActionReward_PPO',
-    name = 'scratch',
-    # local_dir = '/global/scratch/users/neelayjunnarkar/ray_results',
-    local_dir = '../ray_results',
+    name = 'ComboRwd_PPO',
+    # name = 'scratch',
+    local_dir = '/global/scratch/users/neelayjunnarkar/ray_results',
+    # local_dir = '../ray_results',
     checkpoint_at_end = True,
 )
 

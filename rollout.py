@@ -104,16 +104,22 @@ def compute_rollout(agent, env, init_obs):
 # ren_dir = '../ray_results/Vehicle_BoundedActionReward_PPO/ProjRENModel_VehicleLateralEnv_2022-03-08_00-06-53'
 # rnn_dir = '../ray_results/Vehicle_BoundedActionReward_PPO/ProjRNNModel_VehicleLateralEnv_2022-03-08_00-07-05'
 
-ren_dir = '../ray_results/BoundedActionReward_PPO/ProjRENModel_InvertedPendulumEnv_state2_hidden1_0_2022-03-11_12-36-41'
-rnn_dir = '../ray_results/BoundedActionReward_PPO/ProjRNNModel_InvertedPendulumEnv_state2_hidden1_0_2022-03-11_12-37-15'
+# ren_dir = '../ray_results/BoundedActionReward_PPO/ProjRENModel_InvertedPendulumEnv_state2_hidden1_0_2022-03-11_12-36-41'
+# rnn_dir = '../ray_results/BoundedActionReward_PPO/ProjRNNModel_InvertedPendulumEnv_state2_hidden1_0_2022-03-11_12-37-15'
 
-ren_dir = '../ray_results/scratch/ProjRNNModel_InvertedPendulumEnv_state2_hidden1_0_2022-03-11_22-25-33'
-rnn_dir = '../ray_results/scratch/ProjRENModel_InvertedPendulumEnv_state2_hidden1_0_2022-03-11_22-28-53'
+# ren_dir = '../ray_results/scratch/ProjRNNModel_InvertedPendulumEnv_state2_hidden1_0_2022-03-11_22-25-33'
+# rnn_dir = '../ray_results/scratch/ProjRENModel_InvertedPendulumEnv_state2_hidden1_0_2022-03-11_22-28-53'
 
-ren_agent, _ = load_agent(ren_dir, checkpoint_path=ren_dir + '/checkpoint_000100/checkpoint-100')
-rnn_agent, env = load_agent(rnn_dir, checkpoint_path=rnn_dir + '/checkpoint_000100/checkpoint-100')#, checkpoint_path=rnn_dir + '/checkpoint_000010/checkpoint-10')
+# ren_dir = "../ray_results/ComboRwd_PPO/ProjRENModel_VehicleLateralEnv_phiLeakyReLU_state4_hidden1_1_phi_cstor=<class 'activations.LeakyReLU'>_2022-03-11_23-27-06"
+# rnn_dir = "../ray_results/ComboRwd_PPO/ProjRNNModel_VehicleLateralEnv_phiTanh_state4_hidden1_0_phi_cstor=<class 'activations.Tanh'>_2022-03-11_23-28-29"
 
-N_iters = 5
+ren_dir = "../ray_results/ComboRwd_PPO/ProjRENModel_InvertedPendulumEnv_phiLeakyReLU_state2_hidden1_2_custom_model=<class 'models.ProjREN.ProjRENModel'>,phi_cstor=<class_2022-03-12_14-27-47"
+rnn_dir = "../ray_results/ComboRwd_PPO/ProjRNNModel_InvertedPendulumEnv_phiLeakyReLU_state2_hidden1_3_custom_model=<class 'models.ProjRNN.ProjRNNModel'>,phi_cstor=<class_2022-03-12_14-27-55"
+
+ren_agent, _ = load_agent(ren_dir, checkpoint_path=ren_dir + '/checkpoint_002000/checkpoint-2000')
+rnn_agent, env = load_agent(rnn_dir, checkpoint_path=rnn_dir + '/checkpoint_002000/checkpoint-2000')#, checkpoint_path=rnn_dir + '/checkpoint_000010/checkpoint-10')
+
+N_iters = 10000
 ren_states = []
 ren_actions = []
 rnn_states = []
@@ -124,6 +130,7 @@ for _ in range(N_iters):
     env_copy = copy.deepcopy(env)
 
     ren_state, ren_action = compute_rollout(ren_agent, env, obs)
+    assert ren_state.shape[1] == env.time_max + 1, 'fail long'
     ren_states.append(ren_state)
     ren_actions.append(ren_action)
 

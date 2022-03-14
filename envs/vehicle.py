@@ -99,7 +99,13 @@ class VehicleLateralEnv(gym.Env):
 
         u = np.clip(u, -self.max_steering, self.max_steering)
         # costs = 0.01 * e**2 + 1/25.0 * edot**2 + etheta**2 + 1/25.0 * ethetadot**2 + 2.0/(np.pi/6.0)**2 * (u*self.factor)**2 - 5.0
-        costs = 10*(np.max([0, np.abs(u[0]*self.factor)-self.soft_max_steering]) - self.max_steering*self.factor)
+        # costs = 10*(np.max([0, np.abs(u[0]*self.factor)-self.soft_max_steering]) - self.max_steering*self.factor)
+
+        Ju = 5*np.max([0, np.abs(u[0]*self.factor)-self.soft_max_steering])
+        max_Ju = 5*(self.max_steering - self.soft_max_steering)
+        Js = 1*e**2 + 0.1*edot**2 + 1*etheta**2 + 0.1*ethetadot**2 + 0.01*(u[0]*self.factor)**2
+        max_Js = 1*self.x1lim**2 + 0.1*self.x2lim**2 + 1*self.x3lim**2 + 0.1*self.x4lim**2 + 0.01*self.max_steering**2
+        costs = Ju + Js - (max_Ju + max_Js)/10
 
         self.state = self.AG @ self.state + self.BG @ u
 

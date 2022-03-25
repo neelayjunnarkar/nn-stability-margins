@@ -42,7 +42,7 @@ class VehicleLateralEnv(gym.Env):
         self.max_steering = np.pi/6 #* factor
         self.soft_max_steering = self.max_steering / 16
 
-        self.time_max = 30
+        self.time_max = 50
 
         # continuous-time model
         Ac = np.array([
@@ -94,6 +94,9 @@ class VehicleLateralEnv(gym.Env):
 
         self.state_size = self.nx
 
+        self.max_Js = 1*self.x1lim**2 + 0.1*self.x2lim**2 + 1*self.x3lim**2 + 0.1*self.x4lim**2 + 0.01*self.max_steering**2
+        self.max_reward = self.max_Js
+
     def step(self, u):
         e, edot, etheta, ethetadot = self.state
 
@@ -101,11 +104,12 @@ class VehicleLateralEnv(gym.Env):
         # costs = 0.01 * e**2 + 1/25.0 * edot**2 + etheta**2 + 1/25.0 * ethetadot**2 + 2.0/(np.pi/6.0)**2 * (u*self.factor)**2 - 5.0
         # costs = 10*(np.max([0, np.abs(u[0]*self.factor)-self.soft_max_steering]) - self.max_steering*self.factor)
 
-        Ju = 5*np.max([0, np.abs(u[0]*self.factor)-self.soft_max_steering])
-        max_Ju = 5*(self.max_steering - self.soft_max_steering)
+        # Ju = 5*np.max([0, np.abs(u[0]*self.factor)-self.soft_max_steering])
+        # max_Ju = 5*(self.max_steering - self.soft_max_steering)
         Js = 1*e**2 + 0.1*edot**2 + 1*etheta**2 + 0.1*ethetadot**2 + 0.01*(u[0]*self.factor)**2
-        max_Js = 1*self.x1lim**2 + 0.1*self.x2lim**2 + 1*self.x3lim**2 + 0.1*self.x4lim**2 + 0.01*self.max_steering**2
-        costs = Ju + Js - (max_Ju + max_Js)/10
+        
+        # costs = Ju + Js - (max_Ju + max_Js)/10
+        costs = Js - self.max_Js
 
         self.state = self.AG @ self.state + self.BG @ u
 
@@ -118,7 +122,8 @@ class VehicleLateralEnv(gym.Env):
         return self.get_obs(), -costs, terminated, {}
 
     def reset(self):
-        high = np.array([1.0, 0.5, 0.1, 0.5], dtype=np.float32) * self.factor
+        # high = np.array([1.0, 0.5, 0.1, 0.5], dtype=np.float32) * self.factor
+        high = 0.5*self.state_space.high
         self.state = self.np_random.uniform(low=-high, high=high).astype(np.float32)
         self.init_state = self.state.copy()
         self.time = 0

@@ -85,7 +85,7 @@ def compute_rollout(agent, env, init_obs):
         prev_rew = rew
         n_steps += 1
     if n_steps < env.time_max+1:
-        print('failure', agent.__name__)
+        print('failure')
 
     states = np.stack(states).T
     actions = np.stack(actions).T
@@ -113,13 +113,29 @@ def compute_rollout(agent, env, init_obs):
 # ren_dir = "../ray_results/ComboRwd_PPO/ProjRENModel_VehicleLateralEnv_phiLeakyReLU_state4_hidden1_1_phi_cstor=<class 'activations.LeakyReLU'>_2022-03-11_23-27-06"
 # rnn_dir = "../ray_results/ComboRwd_PPO/ProjRNNModel_VehicleLateralEnv_phiTanh_state4_hidden1_0_phi_cstor=<class 'activations.Tanh'>_2022-03-11_23-28-29"
 
-ren_dir = "../ray_results/ComboRwd_PPO/ProjRENModel_InvertedPendulumEnv_phiLeakyReLU_state2_hidden1_2_custom_model=<class 'models.ProjREN.ProjRENModel'>,phi_cstor=<class_2022-03-12_14-27-47"
-rnn_dir = "../ray_results/ComboRwd_PPO/ProjRNNModel_InvertedPendulumEnv_phiLeakyReLU_state2_hidden1_3_custom_model=<class 'models.ProjRNN.ProjRNNModel'>,phi_cstor=<class_2022-03-12_14-27-55"
+# ren_dir = "../ray_results/ComboRwd_PPO/ProjRENModel_InvertedPendulumEnv_phiLeakyReLU_state2_hidden1_2_custom_model=<class 'models.ProjREN.ProjRENModel'>,phi_cstor=<class_2022-03-12_14-27-47"
+# rnn_dir = "../ray_results/ComboRwd_PPO/ProjRNNModel_InvertedPendulumEnv_phiLeakyReLU_state2_hidden1_3_custom_model=<class 'models.ProjRNN.ProjRNNModel'>,phi_cstor=<class_2022-03-12_14-27-55"
 
-ren_agent, _ = load_agent(ren_dir, checkpoint_path=ren_dir + '/checkpoint_002000/checkpoint-2000')
-rnn_agent, env = load_agent(rnn_dir, checkpoint_path=rnn_dir + '/checkpoint_002000/checkpoint-2000')#, checkpoint_path=rnn_dir + '/checkpoint_000010/checkpoint-10')
+# ren_dir = "../ray_results/scratch/ProjRENModel_InvertedPendulumEnv_phiTanh_state2_hidden16_0_2022-03-15_23-03-06"
 
-N_iters = 10000
+# rnn_dir = "../ray_results/scratch/ProjRNNModel_InvertedPendulumEnv_phiTanh_state2_hidden16_0_2022-03-15_23-00-19"
+
+# rnn_dir = "../ray_results/scratch/ProjRNNModel_InvertedPendulumEnv_phiTanh_state2_hidden1_0_custom_model=<class 'models.ProjRNN.ProjRNNModel'>_2022-03-22_16-32-41"
+# ren_dir = "../ray_results/scratch/ProjRENModel_InvertedPendulumEnv_phiTanh_state2_hidden1_1_custom_model=<class 'models.ProjREN.ProjRENModel'>_2022-03-22_16-32-41"
+
+# rnn_dir = "../ray_results/scratch/ProjRNNModel_InvertedPendulumEnv_phiTanh_state2_hidden16_0_2022-03-22_18-46-28"
+# ren_dir = "../ray_results/scratch/ProjRENModel_InvertedPendulumEnv_phiTanh_state2_hidden16_0_2022-03-22_18-46-14"
+
+# rnn_dir = "../ray_results/scratch/ProjRNNModel_InvertedPendulumEnv_phiTanh_state2_hidden16_0_2022-03-22_19-01-06"
+# ren_dir = "../ray_results/scratch/ProjRENModel_InvertedPendulumEnv_phiTanh_state2_hidden16_0_2022-03-22_19-02-10"
+
+rnn_dir = "../ray_results/URwd_PPO/ProjRNNModel_InvertedPendulumEnv_phiTanh_state2_hidden16_1_hidden_size=16_2022-03-22_23-40-29"
+ren_dir = "../ray_results/URwd_PPO/ProjRENModel_InvertedPendulumEnv_phiTanh_state2_hidden16_1_hidden_size=16_2022-03-22_23-39-52"
+
+ren_agent, _ = load_agent(ren_dir, checkpoint_path=ren_dir + "/checkpoint_001389/checkpoint-1389")
+rnn_agent, env = load_agent(rnn_dir, checkpoint_path=rnn_dir + "/checkpoint_001389/checkpoint-1389")#, checkpoint_path=rnn_dir + '/checkpoint_000010/checkpoint-10')
+
+N_iters = 10
 ren_states = []
 ren_actions = []
 rnn_states = []
@@ -130,7 +146,7 @@ for _ in range(N_iters):
     env_copy = copy.deepcopy(env)
 
     ren_state, ren_action = compute_rollout(ren_agent, env, obs)
-    assert ren_state.shape[1] == env.time_max + 1, 'fail long'
+    # assert ren_state.shape[1] == env.time_max + 1, 'fail long'
     ren_states.append(ren_state)
     ren_actions.append(ren_action)
 
@@ -161,7 +177,7 @@ for i in range(N_iters):
     plt.plot(ren_actions[i][0], 'tab:orange')
     plt.plot(rnn_actions[i][0], 'tab:blue')
 plt.title("u")
-plt.plot(bounds, linestyle='dashed')
-plt.plot([-x for x in bounds], linestyle='dashed')
+# plt.plot(bounds, linestyle='dashed')
+# plt.plot([-x for x in bounds], linestyle='dashed')
 
 plt.show()

@@ -18,9 +18,9 @@ from deq_lib.solvers import broyden, anderson
 import os
 import math
 
-# N_CPUS = 8 # laptop
-N_CPUS  = int(os.getenv('SLURM_CPUS_ON_NODE'))
-n_tasks = 4
+N_CPUS = 8 # laptop
+# N_CPUS  = int(os.getenv('SLURM_CPUS_ON_NODE'))
+n_tasks = 2
 n_workers_per_task = int(math.floor(N_CPUS/n_tasks))-1-1
 
 # n_workers_per_task = 1
@@ -41,17 +41,17 @@ config = {
     "env": env,
     "env_config": env_config,
     "model": {
-        "custom_model": tune.grid_search([ProjRNNModel, ProjRENModel]), #tune.grid_search([ProjRENModel, ProjRNNModel, ProjRNNOldModel]),
+        "custom_model": ProjRENModel, #tune.grid_search([ProjRENModel, ProjRNNModel, ProjRNNOldModel]),
         "custom_model_config": {
             "state_size": 2,
-            "hidden_size": 1,
-            "phi_cstor": tune.grid_search([Tanh, LeakyReLU]),
+            "hidden_size": tune.grid_search([1, 16]),
+            "phi_cstor": Tanh, # tune.grid_search([Tanh, LeakyReLU]),
             "log_std_init": np.log(0.2),
             "nn_baseline_n_layers": 2,
             "nn_baseline_size": 64,
             # Projecting controller parameters
-            "lmi_eps": 1e-5,
-            "exp_stability_rate": 0.9,
+            "lmi_eps": 1e-3,
+            "exp_stability_rate": 0.95,
             "plant_cstor": env,
             "plant_config": env_config,
             # REN parameters
@@ -82,6 +82,8 @@ print('============ Config ==============')
 print(config)
 print('==================================')
 
+test_env = env(env_config)
+print(f'Max reward per: step: {test_env.max_reward}, rollout: {test_env.max_reward*(test_env.time_max+1)}')
 
 ray.init()
 
@@ -96,19 +98,21 @@ results = tune.run(
     config = config,
     stop = {
         # "training_iteration": 200,
-        'agent_timesteps_total': 2.5e6,
+        'agent_timesteps_total': 100e3,
     },
     # num_samples = 3,
     # search_alg = optuna_search,
     # scheduler = asha_scheduler,
     # fail_fast = True,
-    verbose = 2,
+    verbose = 1,
+    # verbose = False,
     trial_name_creator = name_creator,
-    name = 'ComboRwd_PPO',
-    # name = 'scratch',
-    local_dir = '/global/scratch/users/neelayjunnarkar/ray_results',
-    # local_dir = '../ray_results',
+    # name = 'URwd_PPO',
+    name = 'scratch',
+    # local_dir = '/global/scratch/users/neelayjunnarkar/ray_results',
+    local_dir = '../ray_results',
     checkpoint_at_end = True,
+    checkpoint_freq = 200,
 )
 
 metric = "episode_reward_mean"

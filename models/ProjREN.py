@@ -57,7 +57,7 @@ class ProjRENModel(BaseRNN, RENThetaHatParameterization):
         z0 = torch.zeros(batch_size, 1, self.hidden_size)
         with torch.no_grad():
             z_star = self.solver(lambda z: self.base_phi_t(xi, z, y), z0, threshold = self.f_thresh)['result']
-        new_z_star = z_star
+            new_z_star = z_star
 
         if self.training:
             z_star.requires_grad_()

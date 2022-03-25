@@ -36,11 +36,81 @@ def satisfy_lmi(variables, AG_t, BG2, CG1, eps, decay_factor, \
     try:
         np.linalg.cholesky(condition)
     except:
-        print('REN proj: satisfy lmi: condition not PD')
+        # print('REN proj: satisfy lmi: condition not PD')
         return False
 
     # print('REN proj: satisfy lmi: curr params satisfy lmi')
     return True
+
+def satisfy_orig_stability_cond(
+    A, B, C, D, 
+    state_size, plant_state_size, plant_nonlin_size, hidden_size, 
+    eps, decay_factor, nonlin
+):
+    vP = cp.Variable((state_size + plant_state_size,
+                      state_size + plant_state_size), PSD = True)
+    if not nonlin:
+        plant_nonlin_size = 0
+    
+    vLambda = cp.Variable((plant_nonlin_size + hidden_size, 
+                           plant_nonlin_size + hidden_size), diag = True)
+
+    mat1 = cp.bmat([[A.T@vP@A - decay_factor**2 * vP, A.T@vP@B],
+                    [B.T@vP@A,                        B.T@vP@B]])
+
+    mat2 = cp.bmat([[C,                                  D],
+                    [np.zeros((D.shape[1], C.shape[1])), np.eye(D.shape[1])]])
+    
+    mat3 = cp.bmat([[vLambda, np.zeros((vLambda.shape[0], vLambda.shape[1]))],
+                    [np.zeros((vLambda.shape[0], vLambda.shape[1])), -vLambda]])
+
+    condition = mat1 + mat2.T @ mat3 @ mat2
+
+    eps = 1e-5 if 1e-5 > eps / 100 else eps / 100
+    constraints = [
+        vP - eps * np.eye(vP.shape[0]) >> 0,
+        vLambda  - eps * np.eye(vLambda.shape[0]) >> 0,
+        condition + eps * np.eye(condition.shape[0]) << 0
+    ]
+
+    prob = cp.Problem(cp.Minimize(0), constraints)
+    try:
+        prob.solve(solver = cp.MOSEK)
+    except:
+        # print('============ Failed to solve checking problem')
+        return False
+
+    feas_stats = [cp.OPTIMAL, cp.UNBOUNDED, cp.OPTIMAL_INACCURATE, cp.UNBOUNDED_INACCURATE]
+    if prob.status not in feas_stats:
+        # print('========== ', prob.status)
+        return False
+
+    # Check P and Lambda are positive definite
+    try:
+        P = vP.value
+        Lambda = vLambda.value.toarray()
+    except:
+        # print('============ could not get value of P or Lambda')
+        return False
+
+    if not (np.allclose(P, P.T) and np.allclose(Lambda, Lambda.T)):
+        # print('================== P or Lambda not symm')
+        return False
+    
+    try:
+        np.linalg.cholesky(P)
+    except:
+        # print('================ P not PD')
+        return False
+    
+    try:
+        np.linalg.cholesky(Lambda)
+    except:
+        # print('================== Lambda not PD')
+        return False
+
+    return True
+
 
 def construct_condition(variables, AG_t, BG2, CG1, decay_factor, stacker = 'cvxpy', \
         nonlin = False, Lambda_p = None, BG1_t = None, CG2_t = None, DG3_t = None):
@@ -157,6 +227,7 @@ class LinProjector:
             # self.vX - self.eps*np.eye(self.vX.shape[0]) >> 0, # X positive definite
             # self.vY - self.eps*np.eye(self.vY.shape[0]) >> 0, # Y positive definite
             # self.vLambda_c - self.eps*np.eye(self.vLambda_c.shape[0]) >> 0, # Lambda positive definite
+            self.vLambda_c >> 0,
             condition - self.eps*np.eye(condition.shape[0]) >> 0 # LMI condition holds
         ]
 
@@ -170,7 +241,7 @@ class LinProjector:
 
         originals = [X,   Y,  N11,  N12,  N21,  N22,  Lambda_c,  N12_h,  N21_h,  DK1_t,  DK3_h,  DK4_h]
         if satisfy_lmi(originals, self.AG, self.BG, self.CG, self.eps, self.decay_factor):
-            print(f'RNN Nonlin Projection: DK3_t max sing val (sat cond): {np.linalg.norm(np.linalg.inv(Lambda_c) @ DK3_h, 2)}')
+            print(f'REN Lin Projection: DK3_t max sing val (sat cond): {np.linalg.norm(np.linalg.inv(Lambda_c) @ DK3_h, 2)}')
             return [None for _ in originals]
 
         self.pX.value = X
@@ -187,9 +258,9 @@ class LinProjector:
             self.pDK3_h.value = DK3_h
         self.pDK4_h.value = DK4_h
 
-        t0 = time.time()
+        # t0 = time.time()
         self.prob.solve(solver = cp.MOSEK)
-        tf = time.time()
+        # tf = time.time()
         # print('Lin Projection: Objective value: ', self.prob.value)
         # print('Lin Projection: Computed in: ', tf - t0, 'seconds')
 
@@ -212,10 +283,29 @@ class LinProjector:
         if self.rnn:
             assert np.allclose(oDK3_h, np.zeros_like(oDK3_h)), "RNN Lin Projection: Output DK3_h is nonzero"
         else:
-            print(f'RNN Lin Projection: DK3_t max sing val: {np.linalg.norm(np.linalg.inv(Lambda_c) @ DK3_h, 2)} to {np.linalg.norm(np.linalg.inv(oLambda_c) @ oDK3_h, 2)}')
-
+            print(f'REN Lin Projection: DK3_t max sing val: {np.linalg.norm(np.linalg.inv(Lambda_c) @ DK3_h, 2)} to {np.linalg.norm(np.linalg.inv(oLambda_c) @ oDK3_h, 2)}')
 
         return oX, oY, oN11, oN12, oN21, oN22, oLambda_c, oN12_h, oN21_h, oDK1_t, oDK3_h, oDK4_h
+
+    def satisfy_orig_stability_cond(self, theta_t):
+        # Check if a particular theta_t stabilizes the feedback loop
+        AK_t, BK1_t, BK2_t, CK1_t, DK1_t, DK2_t, CK2_t, DK3_t, DK4_t = theta_t
+
+        A = np.bmat([[self.AG + self.BG@DK2_t@self.CG, self.BG@CK1_t],
+                     [BK2_t@self.CG,                   AK_t]])
+
+        B = np.bmat([[self.BG@DK1_t],
+                     [BK1_t]])
+
+        C = np.bmat([[DK4_t@self.CG, CK2_t]])
+
+        D = DK3_t
+
+        return satisfy_orig_stability_cond(
+            A, B, C, D,
+            self.state_size, self.plant_state_size, 0, self.hidden_size,
+            self.eps, self.decay_factor, nonlin = False
+        )
 
 class NonlinProjector:
     def __init__(self, AG_t, BG1_t, BG2, CG1, CG2_t, DG3_t,
@@ -232,6 +322,7 @@ class NonlinProjector:
         self.decay_factor = decay_factor
 
         self.rnn = rnn
+        self.name_str = 'RNN' if self.rnn else 'REN'
         self.recenter_lambda_p = recenter_lambda_p
 
         self.AG_t = AG_t
@@ -279,6 +370,8 @@ class NonlinProjector:
             self.vDK3_h = cp.Variable(self.pDK3_h.shape)
         self.vDK4_h = cp.Variable(self.pDK4_h.shape)
 
+        # self.vt = cp.Variable(nonneg = True)
+
         variables = [self.vX, self.vY, self.vN11, self.vN12, self.vN21, self.vN22, 
             self.vLambda_c, self.vN12_h, self.vN21_h, self.vDK1_t, self.vDK3_h, self.vDK4_h]
 
@@ -288,20 +381,28 @@ class NonlinProjector:
             BG1_t = self.BG1_t, CG2_t = self.CG2_t, DG3_t = self.DG3_t
         )
 
+        # Try and make condition number of I-XY small
+        # cond_reg = cp.bmat([[self.vX, self.vt*np.eye(self.vX.shape[0])],
+        #                     [self.vt*np.eye(self.vY.shape[0]), self.vY]])
+
         constraints = [
+            # cond_reg - 0.9*self.eps * np.eye(cond_reg.shape[0]) >> 0,
             # self.vX - self.eps * np.eye(self.vX.shape[0]) >> 0,
             # self.vY - self.eps * np.eye(self.vY.shape[0]) >> 0,
             # self.vLambda_c - self.eps * np.eye(self.vLambda_c.shape[0]) >> 0,
+            self.vLambda_c >> 0,
             condition - self.eps * np.eye(condition.shape[0]) >> 0
         ]
 
         obj = sum([cp.sum_squares(var - vVar) for (var, vVar) in zip(obj_params, variables)])
+        # obj -= self.vt # Maximize t
 
         self.prob1 = cp.Problem(cp.Minimize(obj), constraints)
 
         # Setting up the second problem to recenter Lambda_p
         if self.recenter_lambda_p:
             self.vLambda_p = cp.Variable(self.pLambda_p.shape, diag = True)
+            self.vEps = cp.Variable(nonneg = True)
 
             condition2 = construct_condition(
                 obj_params, self.AG_t, self.BG2, self.CG1, self.decay_factor,
@@ -310,9 +411,11 @@ class NonlinProjector:
             )
             constraints2 = [
                 # self.vLambda_p - self.eps * np.eye(self.vLambda_p.shape[0]) >> 0,
-                condition2 - 0.99*self.eps * np.eye(condition2.shape[0]) >> 0 # Mul eps by .9 because it made the problem solve...
+                self.vEps >= 0.9*self.eps,
+                self.vLambda_p >> 0,
+                condition2 - self.vEps * np.eye(condition2.shape[0]) >> 0 # Mul eps by .9 because it made the problem solve...
             ]
-            self.prob2 = cp.Problem(cp.Minimize(0), constraints2)
+            self.prob2 = cp.Problem(cp.Maximize(self.vEps), constraints2)
 
         # Initial Lambda_p value
         
@@ -327,7 +430,7 @@ class NonlinProjector:
         if satisfy_lmi(originals, self.AG_t, self.BG2, self.CG1, self.eps, self.decay_factor,
             nonlin = True, Lambda_p = self.pLambda_p.value,
             BG1_t=self.BG1_t, CG2_t=self.CG2_t, DG3_t=self.DG3_t):
-            print(f'RNN Nonlin Projection: DK3_t max sing val (sat cond): {np.linalg.norm(np.linalg.inv(Lambda_c) @ DK3_h, 2)}')
+            print(f'{self.name_str} Nonlin Projection: DK3_t max sing val (sat cond): {np.linalg.norm(np.linalg.inv(Lambda_c) @ DK3_h, 2)}')
             return [None for _ in originals]
 
         # Project theta hat to stabilizing set.
@@ -345,11 +448,18 @@ class NonlinProjector:
             self.pDK3_h.value = DK3_h
         self.pDK4_h.value = DK4_h
 
-        t0 = time.time()
-        self.prob1.solve(solver = cp.MOSEK)
-        tf = time.time()
-        # print('Nonlin Projection: Objective value: ', self.prob1.value)
-        # print('Nonlin Projection: Computed in: ', tf - t0, 'seconds')
+        try:
+            # t0 = time.time()
+            print(f"{self.name_str} Projection Nonlin Prob 1: Starting solve")
+            self.prob1.solve(solver = cp.MOSEK)
+            # tf = time.time()
+            # print('Nonlin Projection: Objective value: ', self.prob1.value)
+            # print('Nonlin Projection: Computed in: ', tf - t0, 'seconds')
+        except:
+            assert f"{self.name_str} Projection Nonlin Prob 1: Failed to solve"
+        
+        feas_stats = [cp.OPTIMAL, cp.UNBOUNDED, cp.OPTIMAL_INACCURATE, cp.UNBOUNDED_INACCURATE]
+        assert self.prob1.status in feas_stats, f"{self.name_str} Projection Nonlin Prob 1: infeasible"
 
         oX   = self.vX.value
         oY   = self.vY.value
@@ -383,17 +493,20 @@ class NonlinProjector:
                 self.pDK3_h.value = self.vDK3_h.value
             self.pDK4_h.value  = self.vDK4_h.value
 
-
-            t0 = time.time()
-            self.prob2.solve(solver = cp.MOSEK)
-            tf = time.time()
-            # print('RNN Nonlin Update LambdaP Projection: Objective value: ', self.prob2.value)
-            # print('RNN Nonlin Update LambdaP Projection: Computed in: ', tf - t0, 'seconds')
+            try:
+                # t0 = time.time()
+                self.prob2.solve(solver = cp.MOSEK)
+                # tf = time.time()
+                # print('RNN Nonlin Update LambdaP Projection: Objective value: ', self.prob2.value)
+                # print('RNN Nonlin Update LambdaP Projection: Computed in: ', tf - t0, 'seconds')
+            except:
+                assert f"{self.name_str} Projection Nonlin LambdaP Prob: Failed to solve"
 
             self.pLambda_p.value = self.vLambda_p.value.toarray()
+            print(f'{self.name_str} Nonlin Update LambdaP Projection: Used eps = {self.vEps.value}')
 
         # print('RNN Nonlin Projection: Lambda P', self.pLambda_p.value)
-        print(f'RNN Nonlin Projection: DK3_t max sing val: {np.linalg.norm(np.linalg.inv(Lambda_c) @ DK3_h, 2)} to {np.linalg.norm(np.linalg.inv(oLambda_c) @ oDK3_h, 2)}')
+        print(f'{self.name_str} Nonlin Projection: DK3_t max sing val: {np.linalg.norm(np.linalg.inv(Lambda_c) @ DK3_h, 2)} to {np.linalg.norm(np.linalg.inv(oLambda_c) @ oDK3_h, 2)}')
 
         t0 = time.time()
         assert satisfy_lmi([oX, oY, oN11, oN12, oN21, oN22, oLambda_c, oN12_h, oN21_h, oDK1_t, oDK3_h, oDK4_h], self.AG_t, self.BG2, self.CG1, self.eps, self.decay_factor,
@@ -402,3 +515,27 @@ class NonlinProjector:
         tf = time.time()
         # print(f'Checking result took {tf-t0} seconds')
         return oX, oY, oN11, oN12, oN21, oN22, oLambda_c, oN12_h, oN21_h, oDK1_t, oDK3_h, oDK4_h
+
+    def satisfy_orig_stability_cond(self, theta_t):
+        # Check if a particular theta_t stabilizes the feedback loop
+        AK_t, BK1_t, BK2_t, CK1_t, DK1_t, DK2_t, CK2_t, DK3_t, DK4_t = theta_t
+
+        A = np.bmat([[self.AG_t + self.BG2@DK2_t@self.CG1, self.BG2@CK1_t],
+                     [BK2_t@self.CG1,                      AK_t]])
+
+        B = np.bmat([[self.BG1_t,                                      self.BG2@DK1_t],
+                     [np.zeros((BK1_t.shape[0], self.BG1_t.shape[1])), BK1_t]])
+
+        C = np.bmat([[self.CG2_t,     np.zeros((self.CG2_t.shape[0], CK2_t.shape[1]))],
+                     [DK4_t@self.CG1, CK2_t]])
+
+        D = np.bmat([[self.DG3_t, np.zeros((self.DG3_t.shape[0], DK3_t.shape[1]))],
+                     [np.zeros((DK3_t.shape[0], self.DG3_t.shape[1])), DK3_t]])
+
+        return satisfy_orig_stability_cond(
+            A, B, C, D,
+            self.state_size, self.plant_state_size, self.plant_nonlin_size, self.hidden_size,
+            self.eps, self.decay_factor, nonlin = True
+        )
+
+        

@@ -2,7 +2,8 @@ import numpy as np
 import torch
 import torch.nn as nn
 from models.ren_projection import LinProjector, NonlinProjector
-from models.utils import uniform, to_numpy, from_numpy     
+from models.utils import uniform, to_numpy, from_numpy    
+import time 
 
 class ThetaHatParameterization:
     def __init__(
@@ -25,6 +26,7 @@ class ThetaHatParameterization:
         plant = plant_cstor(plant_config)
         self.plant_is_nonlin = plant.is_nonlin()
         self.plant_state_size = plant.state_size
+        assert state_size <= self.plant_state_size, "Controller state size must be <= plant state size"
         if self.plant_is_nonlin:
             self.plant_nonlin_size = plant.nonlin_size
             C_Delta = plant.C_Delta
@@ -45,16 +47,16 @@ class ThetaHatParameterization:
         
         #_T for transpose, _t for tilde, _h for hat
         X_cstor = uniform(self.plant_state_size, self.plant_state_size)
-        X_cstor = X_cstor.t() @ X_cstor
+        X_cstor = X_cstor.t() @ X_cstor + torch.eye(self.plant_state_size)
         self.X_cstor  = nn.Parameter(X_cstor/2.0)
         Y_cstor = uniform(self.plant_state_size, self.plant_state_size)
-        Y_cstor = Y_cstor.t() @ Y_cstor
+        Y_cstor = Y_cstor.t() @ Y_cstor + torch.eye(self.plant_state_size)
         self.Y_cstor  = nn.Parameter(Y_cstor/2.0)
         self.N11 = nn.Parameter(uniform(self.plant_state_size, self.plant_state_size))
         self.N12 = nn.Parameter(uniform(self.plant_state_size, ob_dim))
         self.N21 = nn.Parameter(uniform(ac_dim, self.plant_state_size))
         self.N22 = nn.Parameter(uniform(ac_dim, ob_dim))
-        self.Lambda_c_vec = nn.Parameter(torch.rand(hidden_size) + 1e-5)
+        self.Lambda_c_vec = nn.Parameter(torch.rand(hidden_size) + 1)
         self.N12_h = nn.Parameter(uniform(self.plant_state_size, hidden_size))
         self.N21_h = nn.Parameter(uniform(hidden_size, self.plant_state_size))
         self.DK1_t = nn.Parameter(uniform(ac_dim, hidden_size))
@@ -82,6 +84,8 @@ class ThetaHatParameterization:
                 state_size, hidden_size, ob_dim, ac_dim, rnn = self.rnn)
 
         self.project()
+        # self.construct_theta_h()
+        # self.recover_theta_t()
 
     def construct_theta_h(self):
         self.X = self.X_cstor + self.X_cstor.t()
@@ -141,8 +145,15 @@ class ThetaHatParameterization:
         X and Y must be positive definite symmetric.
         Lambda must be positive definite diagonal.
         """
-        U = torch.hstack((self.X, torch.zeros(self.X.shape[0], self.state_size - self.plant_state_size)))
-        V = torch.hstack((torch.inverse(self.X) - self.Y, torch.zeros(self.X.shape[0], self.state_size - self.plant_state_size)))
+
+        # print(f'Condition numbers: X: {torch.linalg.cond(self.X)}, Y: {torch.linalg.cond(self.Y)}')
+
+        # U = torch.hstack((self.X, torch.zeros(self.X.shape[0], self.state_size - self.plant_state_size)))
+        # V = torch.hstack((torch.inverse(self.X) - self.Y, torch.zeros(self.X.shape[0], self.state_size - self.plant_state_size)))
+
+        U = self.X[:, :self.state_size]
+        V0 = self.X.inverse() - self.Y
+        V = V0[:, :self.state_size]
 
         left = torch.vstack((torch.hstack((U, self.X @ self.BG2)),
                             torch.hstack((torch.zeros(self.BG2.shape[1], U.shape[1]), torch.eye(self.BG2.shape[1])))))
@@ -150,7 +161,7 @@ class ThetaHatParameterization:
                             torch.hstack((self.N21, self.N22))))
         right_T = torch.vstack((torch.hstack((V, self.Y.t() @ self.CG1.t())),
                                 torch.hstack((torch.zeros(self.CG1.shape[0], V.shape[1]), torch.eye(self.CG1.shape[0])))))
-        ABCD = (right_T.pinverse() @ (left.pinverse() @ mid).t()).t()
+        ABCD = left.pinverse() @ mid @ right_T.pinverse().t()
 
         self.AK_tT  = ABCD[:self.state_size, :self.state_size].t()
         self.BK2_tT = ABCD[:self.state_size, self.state_size:].t()
@@ -163,6 +174,29 @@ class ThetaHatParameterization:
         self.DK3_tT = torch.t(Lambda_c_inv @ self.DK3_h)
         self.DK4_tT = torch.t(Lambda_c_inv @ self.DK4_h)
         self.DK1_tT = torch.t(self.DK1_t)
+
+
+        # t0 = time.time()
+        if not self.satisfy_stability_condition():
+            print("Theta Hat: Recover Theta Tilde: Recovered parameters do not satisfy LMI")
+        # tf = time.time()
+        # print(f'Spent {tf-t0} seconds checking if recovered params satisfy LMI')
+
+    def satisfy_stability_condition(self):
+        AK_t = to_numpy(self.AK_tT).T
+        BK1_t = to_numpy(self.BK1_tT).T
+        BK2_t = to_numpy(self.BK2_tT).T
+        CK1_t = to_numpy(self.CK1_tT).T
+        DK1_t = to_numpy(self.DK1_tT).T
+        DK2_t = to_numpy(self.DK2_tT).T
+        CK2_t = to_numpy(self.CK2_tT).T
+        DK3_t = to_numpy(self.DK3_tT).T
+        DK4_t = to_numpy(self.DK4_tT).T
+
+        theta_t = [AK_t, BK1_t, BK2_t, CK1_t, DK1_t, DK2_t, CK2_t, DK3_t, DK4_t]
+        return self.projector.satisfy_orig_stability_cond(theta_t)
+
+
 
 class RNNThetaHatParameterization(ThetaHatParameterization):
     def __init__(self, *args):

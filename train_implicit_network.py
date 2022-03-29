@@ -9,7 +9,7 @@ device = 'cpu'
 # device = 'cuda' if torch.cuda.is_available() else 'cpu'
 print(f'Using {device} device')
 
-def train_loop(dataloader, model, loss_fn, optimizer):
+def train_loop(dataloader, model, loss_fn, optimizer, state_size, action_size):
     # 1. predict
     # 2. compute loss
     # 3. compute gradients through backpropogation
@@ -18,27 +18,37 @@ def train_loop(dataloader, model, loss_fn, optimizer):
     size = len(dataloader.dataset)
     for batch, (X, y) in enumerate(dataloader):
         X = X.to(device)
+        xs = X[:, :state_size]
+        us = X[:, state_size:]
         y = y.to(device)
-        predictions = model(X)
+        predictions = model(xs, us)
         loss = loss_fn(predictions, y)
         optimizer.zero_grad()
         loss.backward()
         optimizer.step()
+
+        with torch.no_grad():
+            max_sing_val = torch.norm(model.D3_T, p = 2)
+            if max_sing_val > 0.99:
+                model.D3_T /= max_sing_val/0.99
+                # print('Updated A to have max sing val of ', torch.norm(model.D3_T, p = 2))
 
         if batch % 10 == 0:
             loss = loss.item() / 1
             current = batch * len(X)
             print(f"loss: {loss:>7f}  [{current:>5d}/{size:>5d}]")
 
-def test_loop(dataloader, model, loss_fn):
+def test_loop(dataloader, model, loss_fn, state_size, action_size):
     size = len(dataloader.dataset)
     num_batches = len(dataloader)
     test_loss = 0
     model.eval()
     for (X, y) in dataloader:
         X = X.to(device)
+        xs = X[:, :state_size]
+        us = X[:, state_size:]
         y = y.to(device)
-        predictions = model(X)
+        predictions = model(xs, us)
         loss = loss_fn(predictions, y)
         test_loss += loss.item()
     test_loss /= num_batches
@@ -51,24 +61,25 @@ env = InvertedPendulumEnv
 env_config = {
     "observation": "partial",
     "normed": True,
-    "factor": 1,
-    "dt": 0.02,
+    "factor": 1
 }
 true_model = env(env_config)
 
 # Setup model and optimizer
 
-lr = 1e-4
+lr = 1e-5
 batch_size = 128
 epochs = 50
 
+action_size = 1
 state_size = 2
-nonlin_size = 4
+nonlin_size = 2
 
 N_train = 100000
 N_test = 1000
 
-model = ImplicitModel(state_size, nonlin_size, Tanh).to(device)
+model = ImplicitModel(action_size, state_size, nonlin_size, Tanh).to(device)
+model.load_state_dict(torch.load('inv_pend_model_B2_nonlin2.pth'))
 optimizer = torch.optim.Adam(model.parameters(), lr = lr)
 loss_fn = torch.nn.MSELoss()
 
@@ -79,15 +90,20 @@ def create_dataset(size):
     init_states = 2*init_states - 1
     init_states = init_states * torch.from_numpy(true_model.state_space.high)
 
+    actions = torch.rand(size, true_model.nu)
+    actions = 2*actions - 1
+    actions = actions * torch.from_numpy(true_model.action_space.high)
+
     # Set up next states 
-    zero_input = torch.zeros(*true_model.action_space.shape)
+    # zero_input = torch.zeros(*true_model.action_space.shape)
     next_states = torch.zeros_like(init_states)
     for i in range(init_states.shape[0]):
         true_model.reset(init_states[i].numpy())
-        true_model.step(zero_input.numpy())
+        # true_model.step(zero_input.numpy())
+        true_model.step(actions[i].numpy())
         next_states[i] = torch.from_numpy(true_model.state)
 
-    return init_states, next_states
+    return torch.cat((init_states, actions), 1), next_states
 
 train_dataset = TensorDataset(*create_dataset(N_train))
 test_dataset  = TensorDataset(*create_dataset(N_test))
@@ -100,8 +116,8 @@ test_dataloader  = DataLoader(test_dataset,  batch_size)
 test_losses = []
 for t in range(epochs):
     print(f"Epoch {t+1}\n-------------------------------")
-    train_loop(train_dataloader, model, loss_fn, optimizer)
-    test_loss = test_loop(test_dataloader, model, loss_fn)
+    train_loop(train_dataloader, model, loss_fn, optimizer, state_size, action_size)
+    test_loss = test_loop(test_dataloader, model, loss_fn, state_size, action_size)
     test_losses.append(test_loss)
 print(test_losses)
 
@@ -111,11 +127,16 @@ plt.show()
 
 # Final test and display rollouts
 N = 30
-rollout_len = 100
-control = torch.zeros(*true_model.action_space.shape)
-init_states = torch.zeros(N, true_model.state_size)
-for i in range(true_model.state_size):
-    init_states[:, i] = torch.linspace(-true_model.state_space.high[i], true_model.state_space.high[i], N)
+rollout_len = 300
+# control = torch.zeros(*true_model.action_space.shape)
+
+# init_states = torch.zeros(N, true_model.state_size)
+# for i in range(true_model.state_size):
+#     init_states[:, i] = torch.linspace(-true_model.state_space.high[i], true_model.state_space.high[i], N)
+
+init_states = torch.rand(N, true_model.state_size)
+init_states = 2*init_states - 1
+init_states = init_states * torch.from_numpy(true_model.state_space.high)
 
 # Compute all rollouts
 true_rollouts = torch.zeros(N, rollout_len, true_model.state_size)
@@ -127,9 +148,10 @@ with torch.no_grad():
         true_rollouts[i, 0] = init_states[i]
         model_rollouts[i, 0] = init_states[i]
         for k in range(1, rollout_len):
-            true_model.step(control.numpy(), fail_on_time_limit = False, fail_on_state_space = False)
+            action = true_model.action_space.sample()
+            true_model.step(action, fail_on_time_limit = False, fail_on_state_space = False)
             true_rollouts[i, k] = torch.from_numpy(true_model.state)
-            model_rollouts[i, k] = model(model_rollouts[i, k-1].reshape(1, true_model.state_size))
+            model_rollouts[i, k] = model(model_rollouts[i, k-1].reshape(1, true_model.state_size), torch.from_numpy(action.reshape(1, action_size)))
 
     plt.figure()
     plt.subplot(211)
@@ -146,4 +168,4 @@ with torch.no_grad():
 
     plt.show()
 
-torch.save(model, 'inv_pend_model.pth')
+# torch.save(model.state_dict(), 'inv_pend_model_B2_nonlin2-blah.pth')

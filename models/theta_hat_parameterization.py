@@ -28,18 +28,17 @@ class ThetaHatParameterization:
         self.plant_state_size = plant.state_size
         assert state_size <= self.plant_state_size, "Controller state size must be <= plant state size"
         if self.plant_is_nonlin:
+            [AG, BG1, BG2, CG1, CG2, DG3, C_Delta, D_Delta] = plant.get_params()
             self.plant_nonlin_size = plant.nonlin_size
-            C_Delta = plant.C_Delta
-            D_Delta = plant.D_Delta
             S_Delta = (C_Delta + D_Delta)/2.0
             L_Delta = (D_Delta - C_Delta)/2.0
-            MG3 = np.linalg.inv(np.eye(plant.DG3.shape[0]) - S_Delta * plant.DG3)
-            self.AG_t = from_numpy(plant.AG + S_Delta * plant.BG1 @ MG3 @ plant.CG2)
-            self.BG1_t = from_numpy(plant.BG1 @ MG3 * L_Delta)
-            self.BG2 = from_numpy(plant.BG2)
-            self.CG1 = from_numpy(plant.CG1)
-            self.CG2_t = from_numpy(plant.CG2 + S_Delta * plant.DG3 @ MG3 @ plant.CG2)
-            self.DG3_t = from_numpy(L_Delta * plant.DG3 @ MG3)        
+            MG3 = np.linalg.inv(np.eye(DG3.shape[0]) - S_Delta * DG3)
+            self.AG_t = from_numpy(AG + S_Delta * BG1 @ MG3 @ CG2)
+            self.BG1_t = from_numpy(BG1 @ MG3 * L_Delta)
+            self.BG2 = from_numpy(BG2)
+            self.CG1 = from_numpy(CG1)
+            self.CG2_t = from_numpy(CG2 + S_Delta * DG3 @ MG3 @ CG2)
+            self.DG3_t = from_numpy(L_Delta * DG3 @ MG3)        
         else:
             self.AG_t = from_numpy(plant.AG)
             self.BG2  = from_numpy(plant.BG)

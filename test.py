@@ -1,6 +1,6 @@
 import ray
 from ray import tune
-from envs import CartpoleEnv, InvertedPendulumEnv, LinearizedInvertedPendulumEnv, PendubotEnv, VehicleLateralEnv, PowergridEnv
+from envs import CartpoleEnv, InvertedPendulumEnv, LearnedInvertedPendulumEnv, LinearizedInvertedPendulumEnv, PendubotEnv, VehicleLateralEnv, PowergridEnv, OtherInvertedPendulumEnv
 from models.RNN import RNNModel
 from models.ProjRNN import ProjRNNModel
 from models.ProjREN import ProjRENModel
@@ -20,18 +20,20 @@ import math
 
 N_CPUS = 8 # laptop
 # N_CPUS  = int(os.getenv('SLURM_CPUS_ON_NODE'))
-n_tasks = 2
+n_tasks = 1
 n_workers_per_task = int(math.floor(N_CPUS/n_tasks))-1-1
 
 # n_workers_per_task = 1
 
 print('==================Using ', n_workers_per_task, ' workers per task==========================')
 
-env = InvertedPendulumEnv
-env_config = {
+
+env = OtherInvertedPendulumEnv
+env_config = {  
     "observation": "partial",
     "normed": True,
     "factor": 1,
+    # "model_params": torch.load('inv_pend_model_nonlin2.pth')
 }
 
 # Configure the algorithm.
@@ -41,17 +43,17 @@ config = {
     "env": env,
     "env_config": env_config,
     "model": {
-        "custom_model": ProjRENModel, #tune.grid_search([ProjRENModel, ProjRNNModel, ProjRNNOldModel]),
+        "custom_model": ProjRNNOldModel, #tune.grid_search([ProjRENModel, ProjRNNModel, ProjRNNOldModel]),
         "custom_model_config": {
             "state_size": 2,
-            "hidden_size": tune.grid_search([1, 16]),
+            "hidden_size": 1,
             "phi_cstor": Tanh, # tune.grid_search([Tanh, LeakyReLU]),
             "log_std_init": np.log(0.2),
             "nn_baseline_n_layers": 2,
             "nn_baseline_size": 64,
             # Projecting controller parameters
-            "lmi_eps": 1e-3,
-            "exp_stability_rate": 0.95,
+            "lmi_eps": 1e-5,
+            "exp_stability_rate": 1.0, # 0.9,
             "plant_cstor": env,
             "plant_config": env_config,
             # REN parameters
@@ -91,6 +93,7 @@ def name_creator(trial):
     config = trial.config
     model_cfg = config['model']['custom_model_config']
     name = f"{config['model']['custom_model'].__name__}_{config['env'].__name__}_phi{model_cfg['phi_cstor'].__name__}_state{model_cfg['state_size']}_hidden{model_cfg['hidden_size']}"
+    name += f"rho{model_cfg['exp_stability_rate']}"
     return name
 
 results = tune.run(
@@ -98,7 +101,7 @@ results = tune.run(
     config = config,
     stop = {
         # "training_iteration": 200,
-        'agent_timesteps_total': 100e3,
+        'agent_timesteps_total': 20e3,
     },
     # num_samples = 3,
     # search_alg = optuna_search,

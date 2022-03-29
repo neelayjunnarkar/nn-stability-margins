@@ -1,6 +1,6 @@
 from models.RNN import RNNModel
 import numpy as np
-from models.rnn_projection import rnn_project
+from models.rnn_projection import rnn_project, rnn_project_nonlin
 from models.utils import to_numpy, from_numpy    
 
 class ProjRNNOldModel(RNNModel):
@@ -24,10 +24,18 @@ class ProjRNNOldModel(RNNModel):
         
         plant = plant_cstor(plant_config)
         self.plant_is_nonlin = plant.is_nonlin()
-        assert not self.plant_is_nonlin, "Nonlinear plant not supported"
-        self.AG = plant.AG
-        self.BG = plant.BG
-        self.CG = plant.CG
+        if self.plant_is_nonlin:
+            self.Ae = plant.Ae
+            self.Be1 = plant.Be1
+            self.Be2 = plant.Be2
+            self.Ce1 = plant.Ce1
+            self.De1 = plant.De1
+            self.Ce2 = plant.Ce2
+            self.M = plant.M
+        else:
+            self.AG = plant.AG
+            self.BG = plant.BG
+            self.CG = plant.CG
 
         self.Q1_bar = None
         self.Q2_bar = np.eye(self.hidden_size)
@@ -42,12 +50,21 @@ class ProjRNNOldModel(RNNModel):
         CK2_t = to_numpy(self.CK2_tT).T
         DK4_t = to_numpy(self.DK4_tT).T
 
-        AK_t, BK1_t, BK2_t, CK1_t, DK1_t, DK2_t, CK2_t, DK4_t, self.Q1_bar, self.Q2_bar = rnn_project(
-            AK_t, BK1_t, BK2_t, CK1_t, DK1_t, DK2_t, CK2_t, DK4_t, self.Q1_bar, self.Q2_bar,
-            self.AG, self.BG, self.CG,
-            eps = self.lmi_eps,
-            decay_factor = self.exp_stability_rate
-        )
+        if self.plant_is_nonlin:
+            AK_t, BK1_t, BK2_t, CK1_t, DK1_t, DK2_t, CK2_t, DK4_t, self.Q1_bar, self.Q2_bar = rnn_project_nonlin(
+                AK_t, BK1_t, BK2_t, CK1_t, DK1_t, DK2_t, CK2_t, DK4_t,
+                self.Q1_bar, self.Q2_bar,
+                self.Ae, self.Be1, self.Be2, self.Ce1, self.De1, self.Ce2, self.M,
+                eps = self.lmi_eps,
+                decay_factor = self.exp_stability_rate
+            )
+        else:
+            AK_t, BK1_t, BK2_t, CK1_t, DK1_t, DK2_t, CK2_t, DK4_t, self.Q1_bar, self.Q2_bar = rnn_project(
+                AK_t, BK1_t, BK2_t, CK1_t, DK1_t, DK2_t, CK2_t, DK4_t, self.Q1_bar, self.Q2_bar,
+                self.AG, self.BG, self.CG,
+                eps = self.lmi_eps,
+                decay_factor = self.exp_stability_rate
+            )
 
         missing, unexpected = self.load_state_dict({
             'AK_tT' : from_numpy(AK_t.T), 
@@ -60,7 +77,7 @@ class ProjRNNOldModel(RNNModel):
             'DK4_tT': from_numpy(DK4_t.T) 
         }, strict = False)
         assert unexpected == [], 'Loading unexpected key after projection'
-        assert missing == ["log_stds", "value.0.weight", "value.0.bias", "value.2.weight", 
-            "value.2.bias", "value.4.weight", "value.4.bias"], 'Missing keys after projection'
+        # assert missing == ["log_stds", "value.0.weight", "value.0.bias", "value.2.weight", 
+        #     "value.2.bias", "value.4.weight", "value.4.bias"], 'Missing keys after projection'
 
 

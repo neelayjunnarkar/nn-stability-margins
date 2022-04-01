@@ -1,5 +1,11 @@
+"""
+Activation functions with sector-bound information.
+"""
+
 import torch
 import torch.nn as nn
+
+
 
 class LeakyReLU(nn.LeakyReLU):
     def __init__(self):

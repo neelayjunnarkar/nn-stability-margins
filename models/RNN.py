@@ -1,5 +1,4 @@
 from ray.rllib.utils.annotations import override
-import torch
 import torch.nn as nn
 from models.utils import uniform
 from models.BaseRNN import BaseRNN
@@ -16,8 +15,7 @@ class RNNModel(BaseRNN):
     ):
         super().__init__(obs_space, action_space, num_outputs, model_config, name, **custom_args)
 
-        #_T for transpose
-        #_t for tilde
+        #_T for transpose, _t for tilde
         self.AK_tT  = nn.Parameter(uniform(self.state_size, self.state_size))
         self.BK1_tT = nn.Parameter(uniform(self.hidden_size, self.state_size))
         self.BK2_tT = nn.Parameter(uniform(self.ob_dim, self.state_size))

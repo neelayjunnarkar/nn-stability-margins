@@ -3,6 +3,10 @@ from gym import spaces
 import numpy as np
 
 class OtherInvertedPendulumEnv(gym.Env):
+    """
+    Nonlinear inverted pendulum model with Delta(v) = v - sin(v) and 
+    IQC extended system for use with old RNN projection model.
+    """
 
     def __init__(self, env_config):
         factor      = env_config['factor']
@@ -19,11 +23,10 @@ class OtherInvertedPendulumEnv(gym.Env):
             self.dt = env_config['dt']
         else:
             self.dt = 0.02
-        self.max_torque = 2 #
-        self.soft_max_torque = 0.5
+        self.max_torque = 2
         self.max_speed = 8.0 * factor
-        self.max_pos = np.pi * factor # pi/2 = 1.571 # 1.5 * factor
-        self.time_max = 200 # 30 # 200
+        self.max_pos = np.pi * factor
+        self.time_max = 200
         self.max_buff_size = 10
 
         self.AG = np.array([
@@ -71,7 +74,7 @@ class OtherInvertedPendulumEnv(gym.Env):
         self.C_Delta = 0
         # self.D_Delta = 1
         # self.D_Delta = 1.2173
-        self.D_Delta = 0.41 # -1.4 to 1.4
+        self.D_Delta = 0.41 # -1.684 to 1.684 rad
 
         # self.max_reward = 3
         self.max_reward = self.max_torque**2 
@@ -104,27 +107,14 @@ class OtherInvertedPendulumEnv(gym.Env):
 
         u = np.clip(u, -self.max_torque, self.max_torque)
         u *= self.factor
-        # costs = 1/self.factor**2*(th**2 + .1*thdot**2 + 1*((u*self.factor)**2)) - 5
-        # costs = 1*th**2 + 0.1*thdot**2 + 0.01*(u*self.factor)**2 + 5*np.max([0, np.abs(u*self.factor)-0.5])
-        # Ju = 5*np.max([0, np.abs(u[0]*self.factor)-self.soft_max_torque])
-        # max_Ju = 5*(self.max_torque-self.soft_max_torque)
-        # Js = 1*th**2 + 0.1*thdot**2 + 0.01*(u[0]*self.factor)**2
-        # max_Js = 5# 1*self.max_pos**2 + 0.1*self.max_speed**2 + 0.01*self.max_torque**2
+
+        # Js = 1*th**2 + 0.1*thdot**2 + 0.01*(u[0])**2
+        # max_Js = 5
         # costs = Js - max_Js
-        # costs = Ju + Js - max_Ju - max_Js
-        # Jaway = (th-self.max_pos)**2 + 0.1*(self.max_speed-thdot)**2 + 0.01*(u[0]*self.factor-self.max_torque)**2
-        # max_Jaway = 4*max_Js
-        # Jalt = 0.1*(thdot-thdot_old)**2 #+ 0.01*(u[0]*self.factor)**2
-        # max_Jalt = 0.1*(2*self.max_speed)**2 #+ 0.01*self.max_torque**2
+
         Ju = u[0]**2
         max_Ju = self.max_torque**2
         costs = Ju - max_Ju
-        # J = 0
-        # J += ((th-prev_th)/(2*self.max_pos))**2
-        # J += ((thdot-prev_thdot)/(2*self.max_speed))**2
-        # J += (u[0]/self.max_torque)**2
-        # max_J = 3
-        # costs = J - max_J
         
         self.states.append(self.state)
         if len(self.states) > self.max_buff_size:
@@ -141,9 +131,7 @@ class OtherInvertedPendulumEnv(gym.Env):
 
     def reset(self, state = None):
         if state is None:
-            # high = np.array([np.pi/30, np.pi/20], dtype=np.float32) * self.factor
             high = np.array([0.3 * self.max_pos, 0.1 * self.max_speed], dtype=np.float32) * self.factor
-            # high = np.array([0.5 * self.max_pos, 0.25 * self.max_speed], dtype=np.float32) * self.factor
             # high = np.array([0.6 * self.max_pos, 0.25 * self.max_speed], dtype=np.float32) * self.factor
             self.state = self.np_random.uniform(low=-high, high=high).astype(np.float32)
         else:

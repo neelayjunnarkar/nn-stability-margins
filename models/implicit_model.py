@@ -1,9 +1,19 @@
 import torch
 import torch.nn as nn
-from models.utils import uniform, to_numpy, from_numpy
+from models.utils import uniform
 from deq_lib.solvers import broyden
 
 class ImplicitModel(nn.Module):
+    """
+    Learns a model of the form:
+    F(x, u) = Ax + B1 q + B2 u
+    q = Delta(C2 x + D3 q)
+    with sizes
+    F(x, u): state size,
+    x: state size,
+    q: nonlin size,
+    u: action size
+    """
     def __init__(
         self,
         action_size,
@@ -17,6 +27,8 @@ class ImplicitModel(nn.Module):
         self.action_size = action_size
         self.state_size = state_size
         self.nonlin_size = nonlin_size
+
+        #_T for transpose
 
         self.A_T  = nn.Parameter(uniform(self.state_size,  self.state_size))
         self.B1_T = nn.Parameter(uniform(self.nonlin_size, self.state_size))
@@ -64,4 +76,3 @@ class ImplicitModel(nn.Module):
             self.hook = new_q_star.register_hook(backward_hook)
         
         return (x @ self.A_T + new_q_star @ self.B1_T).reshape(batch_size, self.state_size) + us @ self.B2_T
-

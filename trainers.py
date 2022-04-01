@@ -1,3 +1,7 @@
+"""
+RLLib trainers modified to include a projection step after updating model parameters.
+"""
+
 from ray.rllib.agents import ppo, pg
 from ray.rllib.utils.annotations import override
 

@@ -1,25 +1,17 @@
-import ray
-from ray import tune
-from envs import CartpoleEnv, InvertedPendulumEnv, LearnedInvertedPendulumEnv, LinearizedInvertedPendulumEnv, PendubotEnv, VehicleLateralEnv, PowergridEnv
-from models.RNN import RNNModel
-from models.ProjRNN import ProjRNNModel
-from models.ProjREN import ProjRENModel
-from models.ProjRNNOld import ProjRNNOldModel
-from ray.rllib.agents import ppo, pg
+"""
+Reconstructing policies from checkpoints to create plots with rollouts.
+"""
+
 import numpy as np
-from trainers import ProjectedPGTrainer, ProjectedPPOTrainer
-from activations import LeakyReLU, Tanh
-import torch
-import torch.nn as nn
-from deq_lib.solvers import broyden, anderson
 import json
 import matplotlib.pyplot as plt
-import copy
+import torch
 
-# plt.rcParams.update({
-#     "text.usetex": True,
-#     "font.family": "sans-serif",
-#     "font.sans-serif": ["Helvetica"]})
+from envs import CartpoleEnv, InvertedPendulumEnv, LinearizedInvertedPendulumEnv, PendubotEnv, VehicleLateralEnv, PowergridEnv
+from models import ProjRENModel, ProjRNNModel, ProjRNNOldModel
+from activations import LeakyReLU, Tanh
+from deq_lib.solvers import broyden, anderson
+from trainers import ProjectedPGTrainer, ProjectedPPOTrainer
 
 env_map = {
     "<class 'envs.inverted_pendulum.InvertedPendulumEnv'>": InvertedPendulumEnv,
@@ -34,7 +26,6 @@ env_map = {
 model_map = {
     "<class 'models.ProjREN.ProjRENModel'>": ProjRENModel,
     "<class 'models.ProjRNN.ProjRNNModel'>": ProjRNNModel,
-    "<class 'models.RNN.RNNModel'>": RNNModel,
     "<class 'models.ProjRNNOld.ProjRNNOldModel'>": ProjRNNOldModel,
 }
 
@@ -125,7 +116,6 @@ ROLLOUT_LEN = 200 + 1
 learned_agent_dir = '../ray_results/StableRwd_PPO/ProjRENModel_LearnedInvertedPendulumEnv_phiTanh_state2_hidden16_0_2022-03-26_20-00-50'
 true_agent_dir    = '../ray_results/StableRwd_PPO/ProjRENModel_InvertedPendulumEnv_phiTanh_state2_hidden16_0_2022-03-26_20-02-35'
 
-
 true_pp, _ = phase_portrait(true_agent_dir, N_PER_DIM, ROLLOUT_LEN)
 learned_pp, env = phase_portrait(learned_agent_dir, N_PER_DIM, ROLLOUT_LEN)
 
@@ -142,7 +132,6 @@ for i in range(N_PER_DIM):
         plt.plot(rollout[:, 0], rollout[:, 1], color = color)
 plt.xlabel('x1 (radians)')
 plt.ylabel('x2 (radians/second)')
-# plt.subtitle()
 
 plt.subplot(122, title = 'Learned Plant Model', xlim=[-np.pi, np.pi], ylim=[-8, 8])
 for i in range(N_PER_DIM):
@@ -155,61 +144,15 @@ for i in range(N_PER_DIM):
             color = 'C3' # red
         plt.plot(rollout[:, 0], rollout[:, 1], color = color)
 plt.xlabel('x1 (radians)')
-# plt.ylabel('x2 (radians/second)')
-# plt.subtitle()
-
-# plt.title('Phase Portraits')
 plt.show()
 
-# REN vs RNN
-
-# rnn_dir = '../ray_results/InvPend_BoundedActionReward_PPO/ProjRNNModel_InvertedPendulumEnv_0_2022-03-06_23-04-58'
-# ren_dir = '../ray_results/InvPend_BoundedActionReward_PPO/ProjRENModel_InvertedPendulumEnv_0_2022-03-06_23-01-13'
-
-# ren_dir = '../ray_results/InvPend_BoundedActionReward_ShortRollout_PPO/ProjRENModel_InvertedPendulumEnv_0_2022-03-07_13-47-48'
-# rnn_dir = '../ray_results/InvPend_BoundedActionReward_ShortRollout_PPO/ProjRNNModel_InvertedPendulumEnv_0_2022-03-07_13-45-25'
-
-# ren_dir = '../ray_results/scratch/ProjRENModel_InvertedPendulumEnv_0_2022-03-07_23-34-32' # checkpoint_path=ren_dir + '/checkpoint_000010/checkpoint-10'
-# rnn_dir = '../ray_results/scratch/ProjRNNModel_InvertedPendulumEnv_0_2022-03-07_23-17-20' # checkpoint_path=rnn_dir + '/checkpoint_000100/checkpoint-100'
-
-# ren_dir = '../ray_results/Vehicle_BoundedActionReward_PPO/ProjRENModel_VehicleLateralEnv_2022-03-08_00-06-53'
-# rnn_dir = '../ray_results/Vehicle_BoundedActionReward_PPO/ProjRNNModel_VehicleLateralEnv_2022-03-08_00-07-05'
-
-# ren_dir = '../ray_results/BoundedActionReward_PPO/ProjRENModel_InvertedPendulumEnv_state2_hidden1_0_2022-03-11_12-36-41'
-# rnn_dir = '../ray_results/BoundedActionReward_PPO/ProjRNNModel_InvertedPendulumEnv_state2_hidden1_0_2022-03-11_12-37-15'
-
-# ren_dir = '../ray_results/scratch/ProjRNNModel_InvertedPendulumEnv_state2_hidden1_0_2022-03-11_22-25-33'
-# rnn_dir = '../ray_results/scratch/ProjRENModel_InvertedPendulumEnv_state2_hidden1_0_2022-03-11_22-28-53'
-
-# ren_dir = "../ray_results/ComboRwd_PPO/ProjRENModel_VehicleLateralEnv_phiLeakyReLU_state4_hidden1_1_phi_cstor=<class 'activations.LeakyReLU'>_2022-03-11_23-27-06"
-# rnn_dir = "../ray_results/ComboRwd_PPO/ProjRNNModel_VehicleLateralEnv_phiTanh_state4_hidden1_0_phi_cstor=<class 'activations.Tanh'>_2022-03-11_23-28-29"
-
-# ren_dir = "../ray_results/ComboRwd_PPO/ProjRENModel_InvertedPendulumEnv_phiLeakyReLU_state2_hidden1_2_custom_model=<class 'models.ProjREN.ProjRENModel'>,phi_cstor=<class_2022-03-12_14-27-47"
-# rnn_dir = "../ray_results/ComboRwd_PPO/ProjRNNModel_InvertedPendulumEnv_phiLeakyReLU_state2_hidden1_3_custom_model=<class 'models.ProjRNN.ProjRNNModel'>,phi_cstor=<class_2022-03-12_14-27-55"
-
-# ren_dir = "../ray_results/scratch/ProjRENModel_InvertedPendulumEnv_phiTanh_state2_hidden16_0_2022-03-15_23-03-06"
-
-# rnn_dir = "../ray_results/scratch/ProjRNNModel_InvertedPendulumEnv_phiTanh_state2_hidden16_0_2022-03-15_23-00-19"
-
-# rnn_dir = "../ray_results/scratch/ProjRNNModel_InvertedPendulumEnv_phiTanh_state2_hidden1_0_custom_model=<class 'models.ProjRNN.ProjRNNModel'>_2022-03-22_16-32-41"
-# ren_dir = "../ray_results/scratch/ProjRENModel_InvertedPendulumEnv_phiTanh_state2_hidden1_1_custom_model=<class 'models.ProjREN.ProjRENModel'>_2022-03-22_16-32-41"
-
-# rnn_dir = "../ray_results/scratch/ProjRNNModel_InvertedPendulumEnv_phiTanh_state2_hidden16_0_2022-03-22_18-46-28"
-# ren_dir = "../ray_results/scratch/ProjRENModel_InvertedPendulumEnv_phiTanh_state2_hidden16_0_2022-03-22_18-46-14"
-
-# rnn_dir = "../ray_results/scratch/ProjRNNModel_InvertedPendulumEnv_phiTanh_state2_hidden16_0_2022-03-22_19-01-06"
-# ren_dir = "../ray_results/scratch/ProjRENModel_InvertedPendulumEnv_phiTanh_state2_hidden16_0_2022-03-22_19-02-10"
-
-# rnn_dir = "../ray_results/URwd_PPO/ProjRNNModel_InvertedPendulumEnv_phiTanh_state2_hidden16_1_hidden_size=16_2022-03-22_23-40-29"
-# ren_dir = "../ray_results/URwd_PPO/ProjRENModel_InvertedPendulumEnv_phiTanh_state2_hidden16_1_hidden_size=16_2022-03-22_23-39-52"
+# Plotting rollouts of agents against each other from the same initial conditions.
 
 # ren_dir = "../ray_results/Learned_InvPend/ProjRENModel_LearnedInvertedPendulumEnv_phiTanh_state2_hidden4_0_2022-03-25_10-08-38"
 # rnn_dir = "../ray_results/Learned_InvPend/ProjRENModel_InvertedPendulumEnv_phiTanh_state2_hidden4_0_2022-03-25_10-08-52"
 
-
 # ren_agent, _ = load_agent(ren_dir, checkpoint_path=ren_dir + "/checkpoint_000084/checkpoint-84")
 # rnn_agent, env = load_agent(rnn_dir, checkpoint_path=rnn_dir + "/checkpoint_000084/checkpoint-84")#, checkpoint_path=rnn_dir + '/checkpoint_000010/checkpoint-10')
-
 
 # # x vs t
 
@@ -232,10 +175,6 @@ plt.show()
 #     rnn_states.append(rnn_state)
 #     rnn_actions.append(rnn_action)
 
-
-# # bounds = [env.soft_max_steering for _ in range(env.time_max+1)]
-# bounds = [env.soft_max_torque for _ in range(env.time_max+1)]
-
 # plt.figure()
 
 # plt.subplot(311)
@@ -255,7 +194,5 @@ plt.show()
 #     plt.plot(ren_actions[i][0]) #, 'tab:orange')
 #     # plt.plot(rnn_actions[i][0], 'tab:blue')
 # plt.title("u")
-# # plt.plot(bounds, linestyle='dashed')
-# # plt.plot([-x for x in bounds], linestyle='dashed')
 
 # plt.show()

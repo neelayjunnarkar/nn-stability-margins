@@ -77,7 +77,3 @@ class ProjRNNOldModel(RNNModel):
             'DK4_tT': from_numpy(DK4_t.T) 
         }, strict = False)
         assert unexpected == [], 'Loading unexpected key after projection'
-        # assert missing == ["log_stds", "value.0.weight", "value.0.bias", "value.2.weight", 
-        #     "value.2.bias", "value.4.weight", "value.4.bias"], 'Missing keys after projection'
-
-

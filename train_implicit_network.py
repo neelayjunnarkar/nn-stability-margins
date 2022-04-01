@@ -1,3 +1,7 @@
+"""
+Main file for training an implicit model to identify system dynamics of one of the plants in the `envs` folder.
+"""
+
 import torch
 from torch.utils.data import DataLoader, TensorDataset
 import matplotlib.pyplot as plt
@@ -31,7 +35,6 @@ def train_loop(dataloader, model, loss_fn, optimizer, state_size, action_size):
             max_sing_val = torch.norm(model.D3_T, p = 2)
             if max_sing_val > 0.99:
                 model.D3_T /= max_sing_val/0.99
-                # print('Updated A to have max sing val of ', torch.norm(model.D3_T, p = 2))
 
         if batch % 10 == 0:
             loss = loss.item() / 1
@@ -95,11 +98,9 @@ def create_dataset(size):
     actions = actions * torch.from_numpy(true_model.action_space.high)
 
     # Set up next states 
-    # zero_input = torch.zeros(*true_model.action_space.shape)
     next_states = torch.zeros_like(init_states)
     for i in range(init_states.shape[0]):
         true_model.reset(init_states[i].numpy())
-        # true_model.step(zero_input.numpy())
         true_model.step(actions[i].numpy())
         next_states[i] = torch.from_numpy(true_model.state)
 
@@ -128,11 +129,6 @@ plt.show()
 # Final test and display rollouts
 N = 30
 rollout_len = 300
-# control = torch.zeros(*true_model.action_space.shape)
-
-# init_states = torch.zeros(N, true_model.state_size)
-# for i in range(true_model.state_size):
-#     init_states[:, i] = torch.linspace(-true_model.state_space.high[i], true_model.state_space.high[i], N)
 
 init_states = torch.rand(N, true_model.state_size)
 init_states = 2*init_states - 1

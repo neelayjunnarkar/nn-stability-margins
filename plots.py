@@ -1,3 +1,7 @@
+"""
+Plotting training or evaluation data.
+"""
+
 import pandas as pd
 import matplotlib.pyplot as plt
 import numpy as np
@@ -13,47 +17,27 @@ def rollout_len(ds):
 
 # Inverted Pendulum: Current vs Old
 
-ren_urwd_1_ds = pd.read_csv('../ray_results/URwd_PPO/ProjRENModel_OtherInvertedPendulumEnv_phiTanh_state2_hidden1rho1.0_0_2022-03-28_12-23-23/progress.csv')
-rnn_old_urwd_1_ds = pd.read_csv('../ray_results/URwd_PPO/ProjRNNOldModel_OtherInvertedPendulumEnv_phiTanh_state2_hidden1rho1.0_0_hidden_size=1_2022-03-28_12-26-16/progress.csv')
+# ren_urwd_1_ds = pd.read_csv('../ray_results/URwd_PPO/ProjRENModel_OtherInvertedPendulumEnv_phiTanh_state2_hidden1rho1.0_0_2022-03-28_12-23-23/progress.csv')
+# rnn_old_urwd_1_ds = pd.read_csv('../ray_results/URwd_PPO/ProjRNNOldModel_OtherInvertedPendulumEnv_phiTanh_state2_hidden1rho1.0_0_hidden_size=1_2022-03-28_12-26-16/progress.csv')
 
-ren_num_samples = num_env_steps_sampled(ren_urwd_1_ds)
-rnn_old_num_samples = num_env_steps_sampled(rnn_old_urwd_1_ds)
+rnn_old_urwd_8_ds = pd.read_csv('../ray_results/URwd_PPO/ProjRNNOldModel_OtherInvertedPendulumEnv_phiTanh_state8_hidden8rho1.0_0_2022-03-28_21-22-33/progress.csv')
+ren_urwd_4_ds = pd.read_csv('../ray_results/URwd_PPO/ProjRENModel_OtherInvertedPendulumEnv_phiTanh_state2_hidden4rho1.0_0_2022-03-28_21-25-07/progress.csv')
 
-ren_rwd = reward(ren_urwd_1_ds)
-rnn_old_rwd = reward(rnn_old_urwd_1_ds)
+ren_num_samples = num_env_steps_sampled(ren_urwd_4_ds)
+rnn_old_num_samples = num_env_steps_sampled(rnn_old_urwd_8_ds)
 
-max_reward = 804
-upper_bound = max_reward*np.ones_like(ren_num_samples)
+ren_rwd = reward(ren_urwd_4_ds)
+rnn_old_rwd = reward(rnn_old_urwd_8_ds)
 
 plt.figure()
-plt.plot(ren_num_samples, ren_rwd)
 plt.plot(rnn_old_num_samples, rnn_old_rwd)
-# plt.plot(ren_num_samples, upper_bound)
-plt.legend(["REN", "RNN from [4]"])
+plt.plot(ren_num_samples, ren_rwd)
+plt.legend(["RNN from [4]", "REN"])
 plt.title("Reward vs. Number Plant Step Samples")
 plt.xlabel("Number of Plant Step Samples")
 plt.ylabel("Reward")
+plt.ylim([500, 804])
 plt.show()
-
-# Inverted Pendulum section
-
-# ren_urwd_16_file = pd.read_csv('../ray_results/URwd_PPO/ProjRENModel_InvertedPendulumEnv_phiTanh_state2_hidden16_1_hidden_size=16_2022-03-25_15-46-21/progress.csv')
-# rnn_urwd_16_file = pd.read_csv('../ray_results/URwd_PPO/ProjRNNModel_InvertedPendulumEnv_phiTanh_state2_hidden16_1_hidden_size=16_2022-03-25_15-48-48/progress.csv')
-
-# ren_num_env_steps_sampled = ren_urwd_16_file['num_env_steps_sampled'].values
-# ren_rwds = ren_urwd_16_file['episode_reward_mean'].values
-
-# rnn_num_env_steps_sampled = rnn_urwd_16_file['num_env_steps_sampled'].values
-# rnn_rwds = rnn_urwd_16_file['episode_reward_mean'].values
-
-# plt.figure()
-# plt.plot(ren_num_env_steps_sampled, ren_rwds)
-# plt.plot(rnn_num_env_steps_sampled, rnn_rwds)
-# plt.legend(["REN", "RNN"])
-# plt.title('REN and RNN: Reward vs No. Plant Step Samples')
-# plt.xlabel('Number of Plant Step Samples')
-# plt.ylabel('Reward')
-# plt.show()
 
 # Neural net plant section
 

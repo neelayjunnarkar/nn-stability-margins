@@ -1,4 +1,3 @@
-from http.client import PROXY_AUTHENTICATION_REQUIRED
 import torch
 import torch.nn as nn
 
@@ -55,8 +54,10 @@ class BaseRNN(RecurrentNetwork, nn.Module):
 
         self.log_stds = nn.Parameter(log_std_init * torch.ones(self.ac_dim))
 
-        self.value = build_mlp(input_size = self.ob_dim, output_size = 1, 
-            n_layers = nn_baseline_n_layers, size = nn_baseline_size)
+        self.value = build_mlp(
+            input_size = self.ob_dim, output_size = 1, 
+            n_layers = nn_baseline_n_layers, size = nn_baseline_size
+        )
         
         self._last_obs = None
 
@@ -97,5 +98,5 @@ class BaseRNN(RecurrentNetwork, nn.Module):
         self._last_obs = obs.clone()
 
         log_stds_rep = self.log_stds.repeat(batch_size, time_len, 1)
-        outputs = torch.cat((actions, log_stds_rep), dim=2)
+        outputs = torch.cat((actions, log_stds_rep), dim = 2)
         return outputs, [state]

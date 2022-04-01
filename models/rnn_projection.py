@@ -46,7 +46,6 @@ def rnn_project_nonlin(
         vQ1 - eps * np.eye(vQ1.shape[0]) >> 0,
         vQ2 - eps * np.eye(vQ2.shape[0]) >> 0,
         condition - eps * np.eye(condition.shape[0]) >> 0,
-        # vLambdaIQC >= 0
     ]
 
     obj = sum([cp.sum_squares(var - vVar) for (var, vVar) in zip(originals, variables)])
@@ -85,7 +84,6 @@ def init_q1_nonlin(
     xi_dim,
     rho, eps
 ):
-    
 
     xe_dim = Ae.shape[0]
     D = De1
@@ -174,9 +172,11 @@ def construct_condition_nonlin(
     return condition
 
 
-def rnn_project(AK_t, BK1_t, BK2_t, CK1_t, DK1_t, DK2_t, CK2_t, DK4_t, Q1_bar, Q2_bar,
-            AG, BG, CG,
-            eps, decay_factor):
+def rnn_project(
+    AK_t, BK1_t, BK2_t, CK1_t, DK1_t, DK2_t, CK2_t, DK4_t, Q1_bar, Q2_bar,
+    AG, BG, CG,
+    eps, decay_factor
+):
 
     if Q1_bar is None:
         Q1_bar = init_q1(AG, BG, CG, AK_t.shape[0], rho = decay_factor, eps = eps)
@@ -297,7 +297,6 @@ def init_q1(AG, BG, CG, xi_dim, rho = 0.98, eps = 1e-5):
     LMI2 = yPy
 
     obj = 0
-    # constraints = [LMI1 - eps * np.eye(LMI1.shape[0]) >> 0, LMI2 - eps * np.eye(LMI2.shape[0]) >> 0]
     constraints = [LMI1 >> 0, LMI2 >> 0]
     prob = cp.Problem(cp.Minimize(obj), constraints)
     prob.solve(solver = cp.MOSEK)
@@ -305,24 +304,11 @@ def init_q1(AG, BG, CG, xi_dim, rho = 0.98, eps = 1e-5):
     X = vX.value
     Y = vY.value
 
-    # if xi_dim == x_dim:
-        # Hand picked U and V
     U = X
     V = np.linalg.inv(X) - Y
     P = np.linalg.inv(np.block([[Y, V],[np.eye(x_dim), np.zeros((x_dim, x_dim))]])) @ \
         np.block([[np.eye(x_dim), np.zeros((x_dim, x_dim))],[X, U]])
     Q1 = np.linalg.inv(P)
     Q1 = scipy.linalg.block_diag(Q1, np.eye(xi_dim - x_dim))
-    # else:
-    #     # SVD based method to determine P
-    #     u, s, vh = np.linalg.svd(np.eye(x_dim) - Y @ X, full_matrices=True)
-    #     V = np.block([[u @ np.diag(s), np.zeros((x_dim, xi_dim - x_dim))]])
-    #     U = np.block([[vh.T, np.zeros((x_dim, xi_dim - x_dim))]])
-    #     xhat = np.linalg.lstsq(X @ V, U @ (V.T @ U - np.eye(xi_dim)))[0]
-    #     # xhat = np.linalg.lstsq(V, -Y @ U)[0]
-    #     P = np.block([[X, U],
-    #                 [U.T, xhat]])
-
-    # Q1init = np.linalg.inv(P)
 
     return Q1

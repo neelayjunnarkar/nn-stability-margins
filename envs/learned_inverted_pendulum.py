@@ -1,10 +1,11 @@
-import gym
-from gym import spaces
-import numpy as np
-import torch
 from envs import InvertedPendulumEnv
 
 class LearnedInvertedPendulumEnv(InvertedPendulumEnv):
+    """
+    Class for loading in learned nonlinear inverted pendulum model.
+    Reveals only the learned parameters, but uses the true model for 
+    updating state internally.
+    """
 
     def __init__(self, env_config):
         InvertedPendulumEnv.__init__(self, env_config)

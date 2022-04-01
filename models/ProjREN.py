@@ -1,8 +1,12 @@
+"""
+The controller model presented in the paper.
+"""
+
 from ray.rllib.utils.annotations import override
 from models.RNN import BaseRNN
 from models.theta_hat_parameterization import RENThetaHatParameterization
 import torch
-from deq_lib.solvers import broyden, anderson
+from deq_lib.solvers import broyden
 
 class ProjRENModel(BaseRNN, RENThetaHatParameterization):
     def __init__(
@@ -67,8 +71,6 @@ class ProjRENModel(BaseRNN, RENThetaHatParameterization):
                 if self.hooks:
                     self.hooks[-1].remove()
                     del self.hooks[-1]
-                    # if ptu.device == 'cuda':
-                    # torch.cuda.synchronize()
                 
                 new_grad = self.solver(
                     lambda g: torch.autograd.grad(new_z_star, z_star, g, retain_graph = True)[0] + grad,

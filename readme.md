@@ -1,9 +1,17 @@
 Synthesis of Stabilizing Recurrent Equilibrium Network Controllers
 ==================================================================
 
-This is an implementation of the stabilizing REN controller presented in:
+This is an implementation of the stabilizing REN controller presented at CDC 2022:
 ```
-TODO
+@INPROCEEDINGS{9992684,
+  author={Junnarkar, Neelay and Yin, He and Gu, Fangda and Arcak, Murat and Seiler, Peter},
+  booktitle={2022 IEEE 61st Conference on Decision and Control (CDC)}, 
+  title={Synthesis of Stabilizing Recurrent Equilibrium Network Controllers}, 
+  year={2022},
+  volume={},
+  number={},
+  pages={7449-7454},
+  doi={10.1109/CDC51059.2022.9992684}}
 ```
 
 ## File Structure

@@ -1,0 +1,28 @@
+[tool.poetry]
+name = "stabilizing-ren"
+version = "0.1.0"
+description = "Projection-based method for training a recurrent implicit neural network controller which satisfies LMI conditions."
+authors = ["Neelay Junnarkar <neelay.junnarkar@berkeley.edu>"]
+readme = "readme.md"
+
+[tool.poetry.dependencies]
+python = ">=3.10,<3.11"
+torch = "1.11"
+ray = {version = ">=1,<2", extras = ["rllib", "tune"]}
+cvxpy = {extras = ["copt", "cvxopt", "mosek", "scs", "sdpa"], version = "^1.4.1"}
+termcolor = "^2.4.0"
+cython = "<3"
+# numpy = ">=1.19,<1.20"
+zipp = "^3.17.0"
+gym = "0.21.0"
+protobuf = "<3.21"
+torchdeq = "^0.1.0"
+numpy = "1.21.5"
+importlib-metadata = "^7.0.0"
+slycot = "^0.5.4"
+control = "^0.9.4"
+
+
+[build-system]
+requires = ["poetry-core"]
+build-backend = "poetry.core.masonry.api"

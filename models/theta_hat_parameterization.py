@@ -2,7 +2,7 @@ import numpy as np
 import torch
 import torch.nn as nn
 from models.ren_projection import LinProjector, NonlinProjector
-from models.utils import uniform, to_numpy, from_numpy
+from utils import uniform, to_numpy, from_numpy
 
 class ThetaHatParameterization:
     def __init__(
@@ -89,6 +89,11 @@ class ThetaHatParameterization:
         self.construct_theta_h()
         self.project_to_stabilizing_set()
         self.recover_theta_t()
+
+        print(torch.max(torch.tensor([x.abs().max() for x in [self.AK_tT, self.BK1_tT, self.BK2_tT, 
+                                                            self.CK1_tT, self.DK1_tT, self.DK2_tT, 
+                                                            self.CK2_tT, self.DK3_tT, self.DK4_tT]])))
+
 
     def project_to_stabilizing_set(self):
         X = to_numpy(self.X)

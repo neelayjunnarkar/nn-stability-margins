@@ -3,7 +3,7 @@ The controller model presented in the paper.
 """
 
 from ray.rllib.utils.annotations import override
-from models.RNN import BaseRNN
+from models.oldrnn import BaseRNN
 from models.theta_hat_parameterization import RENThetaHatParameterization
 import torch
 from deq_lib.solvers import broyden

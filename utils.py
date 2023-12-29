@@ -1,6 +1,7 @@
 import torch
 import torch.nn as nn
 import math
+import numpy as np
 
 _str_to_activation = {
     'relu': nn.ReLU(),
@@ -50,13 +51,19 @@ def build_mlp(
 
 
 def uniform(output_size, input_size, lower_bound = None, upper_bound = None):
+    if input_size == 0 or output_size == 0:
+        return torch.zeros((output_size, input_size))
     if lower_bound is None:
         lower_bound = -1/math.sqrt(input_size)
         upper_bound = -lower_bound
     return (upper_bound - lower_bound)*torch.rand(output_size, input_size) + lower_bound
 
-def from_numpy(*args, **kwargs):
-    return torch.from_numpy(*args, **kwargs).float()
+def from_numpy(array, device=None):
+    out = torch.tensor(array.astype(np.float32))
+    if device is not None:
+        return out.to(device)
+    else:
+        return out
 
 def to_numpy(tensor):
     return tensor.to('cpu').detach().numpy()

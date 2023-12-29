@@ -5,7 +5,7 @@ from ray.rllib.models.torch.recurrent_net import RecurrentNetwork
 from ray.rllib.models.modelv2 import ModelV2
 from ray.rllib.utils.annotations import override
 
-from models.utils import build_mlp
+from utils import build_mlp
 
 class BaseRNN(RecurrentNetwork, nn.Module):
     def __init__(
@@ -86,7 +86,7 @@ class BaseRNN(RecurrentNetwork, nn.Module):
         state = state[0]
         batch_size = obs.shape[0]
         time_len = obs.shape[1]
-        actions = torch.zeros(batch_size, time_len, self.ac_dim)        
+        actions = torch.zeros(batch_size, time_len, self.ac_dim)
 
         for k in range(time_len):
             y = obs[:, k]

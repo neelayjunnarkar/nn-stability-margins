@@ -1,7 +1,7 @@
 from models.RNN import RNNModel
 import numpy as np
 from models.rnn_projection import rnn_project, rnn_project_nonlin
-from models.utils import to_numpy, from_numpy    
+from utils import to_numpy, from_numpy    
 
 class ProjRNNOldModel(RNNModel):
     def __init__(

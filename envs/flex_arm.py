@@ -2,12 +2,11 @@ import gym
 import numpy as np
 from gym import spaces
 from gym.utils import seeding
-from variable_structs import PlantParameters
 
 
-class InvertedPendulumEnv(gym.Env):
+class FlexibleArmEnv(gym.Env):
     """
-    Nonlinear inverted pendulum with Deltap(v) = sin(v)
+    Flexible arm on a cart model.
     """
 
     def __init__(self, env_config):
@@ -15,7 +14,7 @@ class InvertedPendulumEnv(gym.Env):
         factor = env_config["factor"]
 
         assert "observation" in env_config
-        observation = env_config["observation"]
+        self.observation = env_config["observation"]
 
         assert "normed" in env_config
         normed = env_config["normed"]
@@ -23,20 +22,45 @@ class InvertedPendulumEnv(gym.Env):
         assert "disturbance_model" in env_config
         self.disturbance_model = env_config["disturbance_model"]
 
+        assert "design_model" in env_config
+        self.design_model = env_config["design_model"]
+
         self.factor = factor
         self.viewer = None
-        self.g = 9.8  # gravity (m/s^2)
-        self.m = 0.15  # mass (Kg)
-        self.l = 0.5  # length of pendulum (m)
-        self.mu = 0.05  # coefficient of friction (Nms/rad)
+
         if "dt" in env_config:  # Discretization time (s)
             self.dt = env_config["dt"]
         else:
             self.dt = 0.01
-        self.max_torque = 2
-        self.max_speed = 8.0
-        self.max_pos = np.pi
-        self.time_max = 200
+
+        self.mb = 1  # Mass of base (Kg)
+        self.mt = 0.1  # Mass of tip (Kg)
+        self.L = 1  # Length of link (m)
+        self.rho = 0.1  # Mass density of Link (N/m)
+
+        self.r = 1e-2  # Radius of rod cross-section (m)
+        self.E = 200e9  # Young's modulus for steel, GPa
+        self.I = (np.pi / 4) * self.r**4  # Area second moment of inertia (m^4)
+        self.EI = self.E * self.I
+        self.flexdamp = 0.9
+
+        self.Mr = self.mb + self.mt + self.rho * self.L  # Total mass (Kg)
+        M = np.array(
+            [
+                [self.Mr, self.mt + self.rho * self.L / 3],
+                [self.mt + self.rho * self.L / 3, self.mt + self.rho * self.L / 5],
+            ],
+            dtype=np.float32,
+        )
+        K = np.array([[0, 0], [0, 4 * self.EI / (self.L**3)]], dtype=np.float32)
+        B = np.diag([0, self.flexdamp]).astype(np.float32)
+
+        self.max_force = 200
+        self.max_x = 1.5
+        self.max_h = 0.66 * self.L
+        self.max_xdot = 25
+        self.max_hdot = 200
+        self.time_max = 1000  # 10 seconds with dt = 0.01
 
         # State xp is (theta, thetadot) where theta is angle from vertical,
         # with theta=0 being inverted, and thetadot is derivative of theta.
@@ -53,41 +77,56 @@ class InvertedPendulumEnv(gym.Env):
         # y is measurement output, and Deltap is the uncertainty.
         # Suffix p indicates plant parameter.
 
-        self.nx = 2  # Plant state size
+        self.nx = 4  # Plant state size
         self.nw = 1  # Output size of uncertainty Deltap
-        self.nd = None # Disturbance size. Defined based on supply_rate.
+        self.nd = None  # Disturbance size. Defined based on supply_rate.
         self.nu = 1  # Control input size
         self.nv = 1  # Input size to uncertainty Deltap
-        self.ne = None # Performance output size. Defined based on supply_rate.
+        self.ne = None  # Performance output size. Defined based on supply_rate.
         self.ny = None  # Measurement output size. Defined later.
 
-        self.Ap = np.array(
-            [[0, 1], [0, -self.mu / (self.m * self.l**2)]], dtype=np.float32
+        # States are (x, h, xdot, hdot)
+        self.Ap = np.bmat(
+            [
+                [np.zeros((2, 2)), np.eye(2)],
+                [-np.linalg.solve(M, K), -np.linalg.solve(M, B)],
+            ]
         )
-        self.Bpw = np.array([[0], [self.g / self.l]], dtype=np.float32)
-        self.Bpu = np.array([[0], [1 / (self.m * self.l**2)]], dtype=np.float32)
-
-        self.Cpv = np.array([[1, 0]], dtype=np.float32)
+        self.Ap = np.asarray(self.Ap).astype(np.float32)
+        self.Bpw = np.zeros((self.nx, self.nw), dtype=np.float32)
+        self.Bpu = np.vstack(
+            [np.zeros((2, 1)), np.linalg.solve(M, np.array([[1], [0]]))]
+        )
+        self.Bpu = np.asarray(self.Bpu).astype(np.float32)
+        self.Cpv = np.zeros((self.nv, self.nx), dtype=np.float32)
         self.Dpvw = np.zeros((self.nv, self.nw), dtype=np.float32)
         self.Dpvu = np.zeros((self.nv, self.nu), dtype=np.float32)
 
-        if observation == "full":  # Observe full state
-            self.ny = self.nx
-            self.Cpy = np.eye(self.nx, dtype=np.float32)
-        elif observation == "partial":  # Observe only angle from vertical
+        if self.observation == "full":  # Observe full state
+            if self.design_model == "flexible":
+                self.ny = self.nx
+                self.Cpy = np.eye(self.nx, dtype=np.float32)
+            elif self.design_model == "rigid":
+                self.ny = 2
+                self.Cpy = np.array([[1, 1, 0, 0], [0, 0, 1, 1]], dtype=np.float32)
+            else:
+                raise ValueError(f"Design model: {self.design_model} unexpected")
+        elif self.observation == "partial":  # Observe sum of x and h
             self.ny = 1
-            self.Cpy = np.array([[1, 0]], dtype=np.float32)
+            self.Cpy = np.array([[1, 1, 0, 0]], dtype=np.float32)
         else:
             raise ValueError(
-                f"observation {observation} must be one of 'partial', 'full'"
+                f"observation {self.observation} must be one of 'partial', 'full', 'rigid_full'"
             )
         self.Dpyw = np.zeros((self.ny, self.nw), dtype=np.float32)
         # Dpyu is always 0
 
         assert "supply_rate" in env_config
-        if env_config["supply_rate"] == "stability":
-            print("Plant using stability construction for disturbance, performance output, and supply rate.")
-            # This has issues because of the -Xde Ded - Ded^T Xde^T - Xde < 0 condition.
+        self.supply_rate = env_config["supply_rate"]
+        if self.supply_rate == "stability":
+            print(
+                "Plant using stability construction for disturbance, performance output, and supply rate."
+            )
             self.nd = 1
             self.ne = self.nx
 
@@ -105,8 +144,10 @@ class InvertedPendulumEnv(gym.Env):
             self.Xdd = 0 * np.eye(self.nd, dtype=np.float32)
             self.Xde = np.zeros((self.nd, self.ne), dtype=np.float32)
             self.Xee = -alpha * np.eye(self.ne, dtype=np.float32)
-        elif env_config["supply_rate"] == "l2_gain":
-            print("Plant using L2 gain construction for disturbance, performance output, and supply rate.")
+        elif self.supply_rate == "l2_gain":
+            print(
+                "Plant using L2 gain construction for disturbance, performance output, and supply rate."
+            )
             # Supply rate for L2 gain of 0.99 from disturbance into input to output being the state
             self.nd = self.nu
             self.ne = self.nx
@@ -125,41 +166,41 @@ class InvertedPendulumEnv(gym.Env):
             self.Xde = np.zeros((self.nd, self.ne), dtype=np.float32)
             self.Xee = -np.eye(self.ne, dtype=np.float32)
         else:
-            raise ValueError(f"Supply rate {env_config['supply_rate']} must be one of: 'stability'.")
+            raise ValueError(
+                f"Supply rate {self.supply_rate} must be one of: 'stability', 'l2_gain'."
+            )
 
         # Make sure dimensions of parameters match up.
         self.check_parameter_sizes()
 
         self.action_space = spaces.Box(
-            low=-self.max_torque,
-            high=self.max_torque,
+            low=-self.max_force,
+            high=self.max_force,
             shape=(self.nu,),
             dtype=np.float32,
         )
-        x_max = np.array([self.max_pos, self.max_speed], dtype=np.float32)
+        x_max = np.array(
+            [self.max_x, self.max_h, self.max_xdot, self.max_hdot], dtype=np.float32
+        )
         self.state_space = spaces.Box(low=-x_max, high=x_max, dtype=np.float32)
-        if observation == "full":
-            ob_max = x_max
-        else:
-            ob_max = x_max[0:1]
+        # if self.observation == "full":
+        #     ob_max = self.Cpy @ x_max
+        # else:
+        #     ob_max = np.array([self.max_x + self.max_h], dtype=np.float32)
+        ob_max = self.Cpy @ x_max
         self.observation_space = spaces.Box(low=-ob_max, high=ob_max, dtype=np.float32)
 
         if normed:
-            self.Cpy = self.Cpy / self.observation_space.high
+            self.Cpy = self.Cpy / self.state_space.high
 
         self.state_size = self.nx
         self.nonlin_size = self.nv  # TODO(Neelay): this nonlin_size parameter likely only works when nv = nw. Fix.
 
-        # Sector bounds on Delta (in this case Delta = sin)
-        # Sin is sector-bounded [0, 1] from [-pi, pi], [2/pi, 1] from [-pi/2, pi/2], and sector-bounded about [-0.2173, 1] in general.
-        self.C_Delta = 0
-        self.D_Delta = 1
+        self.MDeltapvv = np.zeros((self.nv, self.nv), dtype=np.float32)
+        self.MDeltapvw = np.zeros((self.nv, self.nw), dtype=np.float32)
+        self.MDeltapww = np.zeros((self.nw, self.nw), dtype=np.float32)
 
-        self.MDeltapvv = np.array([[-2*self.C_Delta*self.D_Delta]], dtype=np.float32)
-        self.MDeltapvw = np.array([[self.C_Delta+self.D_Delta]], dtype=np.float32)
-        self.MDeltapww = np.array([[-2]], dtype=np.float32)
-
-        self.max_reward = 1 # 2.1
+        self.max_reward = 2
 
         self.seed(env_config["seed"] if "seed" in env_config else None)
 
@@ -168,7 +209,7 @@ class InvertedPendulumEnv(gym.Env):
         return [seed]
 
     def Deltap(self, vp):
-        wp = np.sin(vp)
+        wp = np.zeros((self.nw,), dtype=np.float32)
         return wp
 
     def xdot(self, state, d, u):
@@ -179,10 +220,6 @@ class InvertedPendulumEnv(gym.Env):
         return xdot
 
     def next_state(self, state, d, u):
-        # # 0th order hold on derivative
-        # xdot = self.xdot(state, d, u)
-        # state = state + self.dt * xdot
-
         # Runge-Kutta 4th order
         # Assume d and u are constant
         # More accurate than the 0th order hold
@@ -195,34 +232,31 @@ class InvertedPendulumEnv(gym.Env):
         return state
 
     def step(self, u, fail_on_state_space=True, fail_on_time_limit=True):
-        u = np.clip(u, -self.max_torque, self.max_torque)
-        # u *= self.factor
+        u = np.clip(u, -self.max_force, self.max_force)
 
         if self.disturbance_model == "none":
             d = np.zeros((self.nd,), dtype=np.float32)
-        elif self.disturbance_model == "occasional":
-            # Have disturbance ocurr (in expectation) thrice a second.
-            p = 3*self.dt
-            rand = self.np_random.uniform()
-            if rand < p/2:
-                # print("D low")
-                d = 3*self.action_space.low.astype(np.float32)
-            elif rand < p:
-                # print("D high")
-                d = 3*self.action_space.high.astype(np.float32)
-            else:
-                d = np.zeros((self.nd,), dtype=np.float32)
+        # elif self.disturbance_model == "occasional":
+        #     # Have disturbance ocurr (in expectation) thrice a second.
+        #     p = 3 * self.dt
+        #     rand = self.np_random.uniform()
+        #     if rand < p / 2:
+        #         # print("D low")
+        #         d = 3 * self.action_space.low.astype(np.float32)
+        #     elif rand < p:
+        #         # print("D high")
+        #         d = 3 * self.action_space.high.astype(np.float32)
+        #     else:
+        #         d = np.zeros((self.nd,), dtype=np.float32)
         else:
             raise ValueError(f"Unexpected disturbance model: {self.disturbance_model}.")
 
         self.state = self.next_state(self.state, d, u)
 
-        # Reward for small angle, small angular velocity, and small control
-        theta, thetadot = self.state
-        reward_state = np.exp(-(theta**2)) + np.exp(-(thetadot**2))
-        reward_control = np.exp(-(u[0] ** 2))
-        # reward = reward_state + 0.1*reward_control
-        reward = reward_control
+        # Reward for small state and small control
+        reward_state = np.exp(-(np.linalg.norm(self.state) ** 2))
+        reward_control = np.exp(-(np.linalg.norm(u) ** 2))
+        reward = reward_state + reward_control
 
         terminated = False
         if fail_on_time_limit and self.time >= self.time_max:
@@ -238,15 +272,18 @@ class InvertedPendulumEnv(gym.Env):
 
     def reset(self, state=None):
         if state is None:
-            # high = np.array([0.6 * self.max_pos, 0.1 * self.max_speed], dtype=np.float32) * self.factor
-            high = (
-                np.array([0.6 * self.max_pos, 0.25 * self.max_speed], dtype=np.float32)
-                # * self.factor
+            high = np.array(
+                [
+                    0.66 * self.max_x,
+                    0.66 * self.max_h,
+                    0.01 * self.max_xdot,
+                    0.01 * self.max_hdot,
+                ],
+                dtype=np.float32,
             )
             self.state = self.np_random.uniform(low=-high, high=high).astype(np.float32)
         else:
             self.state = state
-        self.states = [self.state]
         self.time = 0
 
         return self.get_obs()
@@ -254,70 +291,73 @@ class InvertedPendulumEnv(gym.Env):
     def get_obs(self):
         return self.Cpy @ self.state  # TODO(Neelay): generalize
 
-    def is_nonlin(self):
-        return True
-
     def get_params(self):
-        return PlantParameters(
-            self.Ap, self.Bpw, self.Bpd, self.Bpu, 
-            self.Cpv, self.Dpvw, self.Dpvd, self.Dpvu,
-            self.Cpe, self.Dpew, self.Dped, self.Dpeu,
-            self.Cpy, self.Dpyw, self.Dpyd,
-            self.MDeltapvv, self.MDeltapvw, self.MDeltapww,
-            self.Xdd, self.Xde, self.Xee
-        )
-        # return {
-        #     "Ap": self.Ap,
-        #     "Bpw": self.Bpw,
-        #     "Bpd": self.Bpd,
-        #     "Bpu": self.Bpu,
-        #     "Cpv": self.Cpv,
-        #     "Dpvw": self.Dpvw,
-        #     "Dpvd": self.Dpvd,
-        #     "Dpvu": self.Dpvu,
-        #     "Cpe": self.Cpe,
-        #     "Dpew": self.Dpew,
-        #     "Dped": self.Dped,
-        #     "Dpeu": self.Dpeu,
-        #     "Cpy": self.Cpy,
-        #     "Dpyw": self.Dpyw,
-        #     "Dpyd": self.Dpyd,
-        #     "MDeltapvv": self.MDeltapvv,
-        #     "MDeltapvw": self.MDeltapvw,
-        #     "MDeltapww": self.MDeltapww,
-        #     "Xdd": self.Xdd,
-        #     "Xde": self.Xde,
-        #     "Xee": self.Xee,
-        # }
-        # Test for ProjREN
-        # AG = np.array(
-        #     [[1, self.dt], [0, 1 - (self.dt * self.mu) / (self.m * self.l**2)]],
-        #     dtype=np.float32,
-        # )
-
-        # BG1 = np.array(
-        #     [[0], [(self.g * self.dt) / self.l]], dtype=np.float32
-        # )
-        # BG2 = (
-        #     np.array([[0], [self.dt / (self.m * self.l**2)]], dtype=np.float32)
-        # )
-        # # if observation == "full":
-        # #     self.CG1 = np.eye(self.nx, dtype=np.float32)
-        # # elif observation == "partial":
-        # CG1 = np.array([[1, 0]], dtype=np.float32)
-
-        # CG2 = np.array([[1, 0]], dtype=np.float32)
-        # DG3 = np.array([[0]], dtype=np.float32)
-        # return [
-        #     AG,
-        #     BG1,
-        #     BG2,
-        #     CG1,
-        #     CG2,
-        #     DG3,
-        #     self.C_Delta,
-        #     self.D_Delta,
-        # ]
+        if self.design_model == "flexible":
+            return {
+                "Ap": self.Ap,
+                "Bpw": self.Bpw,
+                "Bpd": self.Bpd,
+                "Bpu": self.Bpu,
+                "Cpv": self.Cpv,
+                "Dpvw": self.Dpvw,
+                "Dpvd": self.Dpvd,
+                "Dpvu": self.Dpvu,
+                "Cpe": self.Cpe,
+                "Dpew": self.Dpew,
+                "Dped": self.Dped,
+                "Dpeu": self.Dpeu,
+                "Cpy": self.Cpy,
+                "Dpyw": self.Dpyw,
+                "Dpyd": self.Dpyd,
+                "MDeltapvv": self.MDeltapvv,
+                "MDeltapvw": self.MDeltapvw,
+                "MDeltapww": self.MDeltapww,
+                "Xdd": self.Xdd,
+                "Xde": self.Xde,
+                "Xee": self.Xee,
+            }
+        elif self.design_model == "rigid":
+            # Can copy some because dimensions are same as with flexible model
+            nx = 2
+            Ap = np.array([[0, 1], [0, 0]], dtype=np.float32)
+            Bpu = np.array([[0], [1.0 / self.Mr]], dtype=np.float32)
+            if self.supply_rate == "stability":
+                Bpd = np.zeros((nx, self.nd), dtype=np.float32)
+            elif self.supply_rate == "l2_gain":
+                Bpd = Bpu.copy()
+            else:
+                raise ValueError(f"Unexpected supply rate: {self.supply_rate}")
+            if self.observation == "full":
+                Cpy = np.eye(2, dtype=np.float32)
+            elif self.observation == "partial":
+                Cpy = np.array([[1, 0]], dtype=np.float32)
+            else:
+                raise ValueError(f"Unexpected observavion: {self.observation}")
+            return {
+                "Ap": Ap,
+                "Bpw": np.zeros((nx, self.nw), dtype=np.float32),
+                "Bpd": Bpd,
+                "Bpu": Bpu,
+                "Cpv": np.zeros((self.nv, nx), dtype=np.float32),
+                "Dpvw": self.Dpvw,
+                "Dpvd": self.Dpvd,
+                "Dpvu": self.Dpvu,
+                "Cpe": np.eye(nx, dtype=np.float32),
+                "Dpew": np.zeros((nx, self.nw), dtype=np.float32),
+                "Dped": np.zeros((nx, self.nd), dtype=np.float32),
+                "Dpeu": np.zeros((nx, self.nu), dtype=np.float32),
+                "Cpy": Cpy,
+                "Dpyw": self.Dpyw,
+                "Dpyd": self.Dpyd,
+                "MDeltapvv": self.MDeltapvv,
+                "MDeltapvw": self.MDeltapvw,
+                "MDeltapww": self.MDeltapww,
+                "Xdd": self.Xdd,
+                "Xde": self.Xde,
+                "Xee": self.Xee,
+            }
+        else:
+            raise ValueError(f"Unknown design model: {self.design_model}")
 
     def check_parameter_sizes(self):
         assert (

@@ -32,8 +32,8 @@ from models import (
 )
 from trainers import ProjectedPPOTrainer
 
-# N_CPUS = 1  # test
-N_CPUS = multiprocessing.cpu_count()
+N_CPUS = 1  # test
+# N_CPUS = multiprocessing.cpu_count()
 # N_CPUS  = int(os.getenv('SLURM_CPUS_ON_NODE'))
 n_tasks = 1
 n_workers_per_task = int(math.floor(N_CPUS / n_tasks)) - 1 - 1
@@ -97,7 +97,19 @@ config = {
         #     "dt": dt,
         #     "log_std_init": np.log(1.0)
         # }
-        "custom_model": DissipativeRINN,
+        # "custom_model": DissipativeRINN,
+        # "custom_model_config": {
+        #     "state_size": 2,
+        #     "nonlin_size": 16,
+        #     "log_std_init": np.log(1.0),
+        #     "dt": dt,
+        #     "plant": env,
+        #     "plant_config": env_config,
+        #     "eps": 1e-3,
+        #     "trs_mode": "fixed",
+        #     "min_trs": 1.44,
+        # }
+        "custom_model": DissipativeThetaRINN,
         "custom_model_config": {
             "state_size": 2,
             "nonlin_size": 16,
@@ -108,21 +120,9 @@ config = {
             "eps": 1e-3,
             "trs_mode": "fixed",
             "min_trs": 1.44,
+            "project_delay": 1,
+            "project_spacing": 1, # 10,
         }
-        # "custom_model": DissipativeThetaRINN,
-        # "custom_model_config": {
-        #     "state_size": 2,
-        #     "nonlin_size": 16,
-        #     "log_std_init": np.log(1.0),
-        #     "dt": dt,
-        #     "plant": env,
-        #     "plant_config": env_config,
-        #     "eps": 1e-3,
-        #     "trs": 1.44,
-        #     "min_trs": 0.0,
-        #     "project_delay": 100,
-        #     "project_spacing": 100, # 10,
-        # }
 #         "custom_model": DissipativeSimplestRINN,
 #         "custom_model_config": {
 #             "state_size": 2,
@@ -199,7 +199,7 @@ results = tune.run(
     verbose=1,
     trial_name_creator=name_creator,
     name="scratch",
-    local_dir="../ray_results",
+    local_dir="ray_results",
     checkpoint_at_end=True,
     checkpoint_freq=100,
 )

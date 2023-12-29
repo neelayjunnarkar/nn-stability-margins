@@ -1,8 +1,10 @@
-import numpy as np
-import cvxpy as cp
 import time
 
-from variable_structs import PlantParameters, ControllerThetahatParameters
+import cvxpy as cp
+import numpy as np
+
+from variable_structs import ControllerThetahatParameters, PlantParameters
+
 
 def is_positive_semidefinite(X):
     if not np.allclose(X, X.T):
@@ -11,6 +13,7 @@ def is_positive_semidefinite(X):
     if np.min(eigvals) < 0:
         return False
     return True
+
 
 def is_positive_definite(X):
     # Check symmetric.
@@ -23,12 +26,13 @@ def is_positive_definite(X):
         return False
     return True
 
+
 def construct_dissipativity_matrix(
     plant_params: PlantParameters,
     LDeltap,
     LX,
     controller_params: ControllerThetahatParameters,
-    stacker
+    stacker,
 ):
     if stacker == "numpy":
         stacker = np.bmat
@@ -84,18 +88,22 @@ def construct_dissipativity_matrix(
     mvwtdvd2 = K.Dkvyhat @ P.Dpyd
     mvwtdvd = stacker([[mvwtdvd1], [mvwtdvd2]])
 
+    # fmt: off
     Mww = stacker([
         [P.MDeltapww, np.zeros((P.MDeltapww.shape[0], K.Lambda.shape[1]))],
         [np.zeros((K.Lambda.shape[0], P.MDeltapww.shape[1])), -2 * K.Lambda],
     ])
+    # fmt: on
 
     Dew = stacker([[P.Dpew + P.Dpeu @ K.NA22 @ P.Dpyw, P.Dpew @ K.Dkuw]])
 
     Ded = P.Dped + P.Dpeu @ K.NA22 @ P.Dpyd
 
-    ldeltadvw1 = stacker(
-        [[LDeltap @ (P.Dpvw + P.Dpvu @ K.NA22 @ P.Dpyw), LDeltap @ P.Dpvu @ K.Dkuw]]
-    )
+    # fmt: off
+    ldeltadvw1 = stacker([
+        [LDeltap @ (P.Dpvw + P.Dpvu @ K.NA22 @ P.Dpyw), LDeltap @ P.Dpvu @ K.Dkuw]
+    ])
+    # fmt: on
 
     ldeltadvd1 = LDeltap @ (P.Dpvd + P.Dpvu @ K.NA22 @ P.Dpyd)
 
@@ -104,6 +112,7 @@ def construct_dissipativity_matrix(
     assert np.allclose(P.MDeltapww, P.MDeltapww.T)
     # Ensure Xdd is symmetric. It needs to be for the method overall anyway.
     assert np.allclose(P.Xdd, P.Xdd.T)
+    # fmt: off
     row1 = stacker([[
         ytpay.T,
         np.zeros((
@@ -148,23 +157,26 @@ def construct_dissipativity_matrix(
         [row4],
         [row5],
     ])
+    # fmt: on
     mat = mat + mat.T
 
     return mat
 
 
 class Projector:
-
     def __init__(
         self,
         plant_params: PlantParameters,
         # Epsilon to be used in enforcing definiteness of conditions
         eps,
         # Dimensions of variables for controller
-        nonlin_size, output_size, state_size, input_size,
+        nonlin_size,
+        output_size,
+        state_size,
+        input_size,
         # Parameters for tuning condition number of I - RS,
-        trs_mode, # Either "fixed" or "variable"
-        min_trs, # Used as the trs value when trs_mode="fixed"
+        trs_mode,  # Either "fixed" or "variable"
+        min_trs,  # Used as the trs value when trs_mode="fixed"
     ):
         self.plant_params = plant_params
         self.eps = eps
@@ -188,34 +200,34 @@ class Projector:
     def _construct_projection_problem(self):
         # Parameters: This is the thetahat to be projected into the stabilizing set.
         self.pThetahat = ControllerThetahatParameters(
-            S = cp.Parameter((self.state_size, self.state_size), PSD=True),
-            R = cp.Parameter((self.state_size, self.state_size), PSD=True),
-            NA11 = cp.Parameter((self.state_size, self.state_size)),
-            NA12 = cp.Parameter((self.state_size, self.input_size)),
-            NA21 = cp.Parameter((self.output_size, self.state_size)),
-            NA22 = cp.Parameter((self.output_size, self.input_size)),
-            NB = cp.Parameter((self.state_size, self.nonlin_size)),
-            NC = cp.Parameter((self.nonlin_size, self.state_size)),
-            Dkuw = cp.Parameter((self.output_size, self.nonlin_size)),
-            Dkvyhat = cp.Parameter((self.nonlin_size, self.input_size)),
-            Dkvwhat = cp.Parameter((self.nonlin_size, self.nonlin_size)),
-            Lambda = cp.Parameter((self.nonlin_size, self.nonlin_size), diag=True),
+            S=cp.Parameter((self.state_size, self.state_size), PSD=True),
+            R=cp.Parameter((self.state_size, self.state_size), PSD=True),
+            NA11=cp.Parameter((self.state_size, self.state_size)),
+            NA12=cp.Parameter((self.state_size, self.input_size)),
+            NA21=cp.Parameter((self.output_size, self.state_size)),
+            NA22=cp.Parameter((self.output_size, self.input_size)),
+            NB=cp.Parameter((self.state_size, self.nonlin_size)),
+            NC=cp.Parameter((self.nonlin_size, self.state_size)),
+            Dkuw=cp.Parameter((self.output_size, self.nonlin_size)),
+            Dkvyhat=cp.Parameter((self.nonlin_size, self.input_size)),
+            Dkvwhat=cp.Parameter((self.nonlin_size, self.nonlin_size)),
+            Lambda=cp.Parameter((self.nonlin_size, self.nonlin_size), diag=True),
         )
 
         # Variables: This will be the solution of the projection.
         self.vThetahat = ControllerThetahatParameters(
-            S = cp.Variable((self.state_size, self.state_size), PSD=True),
-            R = cp.Variable((self.state_size, self.state_size), PSD=True),
-            NA11 = cp.Variable((self.state_size, self.state_size)),
-            NA12 = cp.Variable((self.state_size, self.input_size)),
-            NA21 = cp.Variable((self.output_size, self.state_size)),
-            NA22 = cp.Variable((self.output_size, self.input_size)),
-            NB = cp.Variable((self.state_size, self.nonlin_size)),
-            NC = cp.Variable((self.nonlin_size, self.state_size)),
-            Dkuw = cp.Variable((self.output_size, self.nonlin_size)),
-            Dkvyhat = cp.Variable((self.nonlin_size, self.input_size)),
-            Dkvwhat = cp.Variable((self.nonlin_size, self.nonlin_size)),
-            Lambda = cp.Variable((self.nonlin_size, self.nonlin_size), diag=True),
+            S=cp.Variable((self.state_size, self.state_size), PSD=True),
+            R=cp.Variable((self.state_size, self.state_size), PSD=True),
+            NA11=cp.Variable((self.state_size, self.state_size)),
+            NA12=cp.Variable((self.state_size, self.input_size)),
+            NA21=cp.Variable((self.output_size, self.state_size)),
+            NA22=cp.Variable((self.output_size, self.input_size)),
+            NB=cp.Variable((self.state_size, self.nonlin_size)),
+            NC=cp.Variable((self.nonlin_size, self.state_size)),
+            Dkuw=cp.Variable((self.output_size, self.nonlin_size)),
+            Dkvyhat=cp.Variable((self.nonlin_size, self.input_size)),
+            Dkvwhat=cp.Variable((self.nonlin_size, self.nonlin_size)),
+            Lambda=cp.Variable((self.nonlin_size, self.nonlin_size), diag=True),
         )
 
         mat = construct_dissipativity_matrix(
@@ -236,6 +248,7 @@ class Projector:
         else:
             raise ValueError(f"Unexpected trs_mode value of {self.trs_mode}.")
 
+        # fmt: off
         constraints = [
             self.vtrs >= self.min_trs,
             self.vThetahat.S >> self.eps * np.eye(self.vThetahat.S.shape[0]),
@@ -248,39 +261,43 @@ class Projector:
             mat << 0,
         ]
 
+
         cost_projection_error = sum([
-                cp.sum_squares(self.pThetahat.Dkuw - self.vThetahat.Dkuw),
-                cp.sum_squares(self.pThetahat.S - self.vThetahat.S),
-                cp.sum_squares(self.pThetahat.R - self.vThetahat.R),
-                cp.sum_squares(self.pThetahat.Lambda - self.vThetahat.Lambda),
-                cp.sum_squares(self.pThetahat.NA11 - self.vThetahat.NA11),
-                cp.sum_squares(self.pThetahat.NA12 - self.vThetahat.NA12),
-                cp.sum_squares(self.pThetahat.NA21 - self.vThetahat.NA21),
-                cp.sum_squares(self.pThetahat.NA22 - self.vThetahat.NA22),
-                cp.sum_squares(self.pThetahat.NB - self.vThetahat.NB),
-                cp.sum_squares(self.pThetahat.NC - self.vThetahat.NC),
-                cp.sum_squares(self.pThetahat.Dkvyhat - self.vThetahat.Dkvyhat),
-                cp.sum_squares(self.pThetahat.Dkvwhat - self.vThetahat.Dkvwhat),
+            cp.sum_squares(self.pThetahat.Dkuw - self.vThetahat.Dkuw),
+            cp.sum_squares(self.pThetahat.S - self.vThetahat.S),
+            cp.sum_squares(self.pThetahat.R - self.vThetahat.R),
+            cp.sum_squares(self.pThetahat.Lambda - self.vThetahat.Lambda),
+            cp.sum_squares(self.pThetahat.NA11 - self.vThetahat.NA11),
+            cp.sum_squares(self.pThetahat.NA12 - self.vThetahat.NA12),
+            cp.sum_squares(self.pThetahat.NA21 - self.vThetahat.NA21),
+            cp.sum_squares(self.pThetahat.NA22 - self.vThetahat.NA22),
+            cp.sum_squares(self.pThetahat.NB - self.vThetahat.NB),
+            cp.sum_squares(self.pThetahat.NC - self.vThetahat.NC),
+            cp.sum_squares(self.pThetahat.Dkvyhat - self.vThetahat.Dkvyhat),
+            cp.sum_squares(self.pThetahat.Dkvwhat - self.vThetahat.Dkvwhat),
         ])
         cost_size = sum([
-                cp.sum_squares(self.vThetahat.Dkuw),
-                cp.sum_squares(self.vThetahat.S),
-                cp.sum_squares(self.vThetahat.R),
-                cp.sum_squares(self.vThetahat.Lambda),
-                cp.sum_squares(self.vThetahat.NA11),
-                cp.sum_squares(self.vThetahat.NA12),
-                cp.sum_squares(self.vThetahat.NA21),
-                cp.sum_squares(self.vThetahat.NA22),
-                cp.sum_squares(self.vThetahat.NB),
-                cp.sum_squares(self.vThetahat.NC),
-                cp.sum_squares(self.vThetahat.Dkvyhat),
-                cp.sum_squares(self.vThetahat.Dkvwhat),
+            cp.sum_squares(self.vThetahat.Dkuw),
+            cp.sum_squares(self.vThetahat.S),
+            cp.sum_squares(self.vThetahat.R),
+            cp.sum_squares(self.vThetahat.Lambda),
+            cp.sum_squares(self.vThetahat.NA11),
+            cp.sum_squares(self.vThetahat.NA12),
+            cp.sum_squares(self.vThetahat.NA21),
+            cp.sum_squares(self.vThetahat.NA22),
+            cp.sum_squares(self.vThetahat.NB),
+            cp.sum_squares(self.vThetahat.NC),
+            cp.sum_squares(self.vThetahat.Dkvyhat),
+            cp.sum_squares(self.vThetahat.Dkvwhat),
         ])
+        # fmt: on
         objective = cost_projection_error + cost_ill_conditioning + cost_size
 
         self.problem = cp.Problem(cp.Minimize(objective), constraints)
 
-    def project(self, controller_params: ControllerThetahatParameters, solver=cp.MOSEK, **kwargs):
+    def project(
+        self, controller_params: ControllerThetahatParameters, solver=cp.MOSEK, **kwargs
+    ):
         """Projects input variables to set corresponding to dissipative controllers."""
         K = controller_params
         self.pThetahat.Dkuw.value = K.Dkuw
@@ -317,12 +334,14 @@ class Projector:
             raise Exception()
         print(f"Projection objective: {self.problem.value}")
 
+        # fmt: off
         new_controller_params = ControllerThetahatParameters(
             self.vThetahat.S.value, self.vThetahat.R.value, self.vThetahat.NA11.value,
             self.vThetahat.NA12.value, self.vThetahat.NA21.value, self.vThetahat.NA22.value,
             self.vThetahat.NB.value, self.vThetahat.NC.value, self.vThetahat.Dkuw.value,
             self.vThetahat.Dkvyhat.value, self.vThetahat.Dkvwhat.value, self.vThetahat.Lambda.value.toarray()
         )
+        # fmt: on
         return new_controller_params
 
     def is_dissipative(self, controller_params: ControllerThetahatParameters):
@@ -341,10 +360,12 @@ class Projector:
             return False
 
         # Check [R, I; I, S] is positive definite.
+        # fmt: off
         mat = np.asarray(np.bmat([
             [controller_params.R, np.eye(controller_params.R.shape[0])],
             [np.eye(controller_params.R.shape[0]), controller_params.S]
         ]))
+        # fmt: on
         if not is_positive_definite(mat):
             print("[R, I; I, S] is not PD.")
             return False
@@ -359,4 +380,3 @@ class Projector:
         )
         # Check condition mat <= 0
         return is_positive_semidefinite(-mat)
-    

@@ -12,11 +12,19 @@ from theta_dissipativity import Projector
 from utils import build_mlp, from_numpy, to_numpy, uniform
 from variable_structs import ControllerThetaParameters
 
+
 def print_norms(X, name):
-     print("{}: largest gain: {:0.3f}, 1: {:0.3f}, 2: {:0.3f}, inf: {:0.3f}, fro: {:0.3f}".format(
-           name, torch.max(torch.abs(X)), torch.linalg.norm(X, 1), torch.linalg.norm(X, 2), torch.linalg.norm(X, np.inf),
-           torch.linalg.norm(X, 'fro')))
-     
+    print(
+        "{}: largest gain: {:0.3f}, 1: {:0.3f}, 2: {:0.3f}, inf: {:0.3f}, fro: {:0.3f}".format(
+            name,
+            torch.max(torch.abs(X)),
+            torch.linalg.norm(X, 1),
+            torch.linalg.norm(X, 2),
+            torch.linalg.norm(X, np.inf),
+            torch.linalg.norm(X, "fro"),
+        )
+    )
+
 
 class DissipativeSimplestRINN(RecurrentNetwork, nn.Module):
     """
@@ -91,15 +99,15 @@ class DissipativeSimplestRINN(RecurrentNetwork, nn.Module):
         assert "dt" in model_config
         self.dt = model_config["dt"]
 
+        # fmt: off
+        n_layers = model_config["baseline_n_layers"] if "baseline_n_layers" in model_config else 2
+        layer_size = model_config["baseline_size"] if "baseline_size" in model_config else 64
+        # fmt: on
         self.value = build_mlp(
             input_size=obs_space.shape[0],
             output_size=1,
-            n_layers=model_config["baseline_n_layers"]
-            if "baseline_n_layers" in model_config
-            else 2,
-            size=model_config["baseline_size"]
-            if "baseline_size" in model_config
-            else 64,
+            n_layers=n_layers,
+            size=layer_size,
         )
         self._cur_value = None
 
@@ -151,11 +159,10 @@ class DissipativeSimplestRINN(RecurrentNetwork, nn.Module):
             self.Lambda = from_numpy(model_config["Lambda"], device=self.A_T.device)
         else:
             self.Lambda = torch.eye(self.nonlin_size)
-        
-        self.oldtheta = None
-    
-        self.project()
 
+        self.oldtheta = None
+
+        self.project()
 
     def project(self):
         """Modify parameters to ensure satisfaction of dissipativity condition."""
@@ -165,10 +172,14 @@ class DissipativeSimplestRINN(RecurrentNetwork, nn.Module):
                 self.enforce_dissipativity()
             elif self.mode == "simple":
                 print("Mode: simple")
+                # fmt: off
                 controller_params = ControllerThetaParameters(
-                    self.A_T.t(), self.Bw_T.t(), self.By_T.t(), self.Cv_T.t(), self.Dvw_T.t(), self.Dvy_T.t(),
-                    self.Cu_T.t(), self.Duw_T.t(), self.Duy_T.t(), self.Lambda
+                    self.A_T.t(), self.Bw_T.t(), self.By_T.t(),
+                    self.Cv_T.t(), self.Dvw_T.t(), self.Dvy_T.t(),
+                    self.Cu_T.t(), self.Duw_T.t(), self.Duy_T.t(),
+                    self.Lambda
                 )
+                # fmt: on
                 is_dissipative, newP, newLambda = self.projector.is_dissipative(
                     controller_params.torch_to_np(), to_numpy(self.P)
                 )
@@ -181,11 +192,13 @@ class DissipativeSimplestRINN(RecurrentNetwork, nn.Module):
             else:
                 raise ValueError(f"Mode {self.mode} is unknown.")
 
+        # fmt: off
         theta = torch.vstack((
             torch.hstack((self.A_T.t(),  self.Bw_T.t(), self.By_T.t())),
             torch.hstack((self.Cv_T.t(), self.Dvw_T.t(), self.Dvy_T.t())),
             torch.hstack((self.Cu_T.t(), self.Duw_T.t(), self.Duy_T.t()))
         ))
+        # fmt: on
         print_norms(self.A_T.t(), "Ak   ")
         print_norms(self.Bw_T.t(), "Bkw  ")
         print_norms(self.By_T.t(), "Bky  ")
@@ -197,16 +210,23 @@ class DissipativeSimplestRINN(RecurrentNetwork, nn.Module):
         print_norms(self.Duy_T.t(), "Dkuy ")
         print_norms(theta, "theta")
         if self.oldtheta is not None:
-            print_norms(theta - self.oldtheta, f"theta - oldtheta: {torch.allclose(theta, self.oldtheta)}")
+            print_norms(
+                theta - self.oldtheta,
+                f"theta - oldtheta: {torch.allclose(theta, self.oldtheta)}",
+            )
         self.oldtheta = theta.detach().clone()
 
     def enforce_dissipativity(self):
         """Projects current theta parameters to ones that are certified by P and Lambda."""
 
+        # fmt: off
         controller_params = ControllerThetaParameters(
-            self.A_T.t(), self.Bw_T.t(), self.By_T.t(), self.Cv_T.t(), self.Dvw_T.t(), self.Dvy_T.t(),
-            self.Cu_T.t(), self.Duw_T.t(), self.Duy_T.t(), self.Lambda
+            self.A_T.t(), self.Bw_T.t(), self.By_T.t(),
+            self.Cv_T.t(), self.Dvw_T.t(), self.Dvy_T.t(),
+            self.Cu_T.t(), self.Duw_T.t(), self.Duy_T.t(),
+            self.Lambda
         )
+        # fmt: on
         np_controller_params = controller_params.torch_to_np()
         P = to_numpy(self.P)
 
@@ -230,18 +250,13 @@ class DissipativeSimplestRINN(RecurrentNetwork, nn.Module):
         assert (
             unexpected == []
         ), f"Loading unexpected key after projection: {unexpected}"
+        # fmt: off
         assert missing == [
-            "log_stds",
-            "value.0.bias",
-            "value.0.weight_g",
-            "value.0.weight_v",
-            "value.2.bias",
-            "value.2.weight_g",
-            "value.2.weight_v",
-            "value.4.bias",
-            "value.4.weight_g",
-            "value.4.weight_v",
+            "log_stds", "value.0.bias", "value.0.weight_g", "value.0.weight_v",
+            "value.2.bias", "value.2.weight_g", "value.2.weight_v",
+            "value.4.bias", "value.4.weight_g", "value.4.weight_v",
         ], missing
+        # fmt: on
 
     @override(ModelV2)
     def get_initial_state(self):

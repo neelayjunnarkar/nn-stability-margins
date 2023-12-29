@@ -8,14 +8,24 @@ from ray.rllib.utils.annotations import override
 from torchdeq.norm import apply_norm, reset_norm
 
 from activations import activations_map
-from thetahat_dissipativity import Projector
+from theta_dissipativity import Projector as ThetaProjector
+from thetahat_dissipativity import Projector as ThetahatProjector
 from utils import build_mlp, from_numpy, to_numpy, uniform
+from variable_structs import ControllerThetahatParameters, ControllerThetaParameters
+
 
 def print_norms(X, name):
-     print("{}: largest gain: {:0.3f}, 1: {:0.3f}, 2: {:0.3f}, inf: {:0.3f}, fro: {:0.3f}".format(
-           name, torch.max(torch.abs(X)), torch.linalg.norm(X, 1), torch.linalg.norm(X, 2), torch.linalg.norm(X, np.inf),
-           torch.linalg.norm(X, 'fro')))
-     
+    print(
+        "{}: largest gain: {:0.3f}, 1: {:0.3f}, 2: {:0.3f}, inf: {:0.3f}, fro: {:0.3f}".format(
+            name,
+            torch.max(torch.abs(X)),
+            torch.linalg.norm(X, 1),
+            torch.linalg.norm(X, 2),
+            torch.linalg.norm(X, np.inf),
+            torch.linalg.norm(X, "fro"),
+        )
+    )
+
 
 class DissipativeThetaRINN(RecurrentNetwork, nn.Module):
     """
@@ -55,12 +65,8 @@ class DissipativeThetaRINN(RecurrentNetwork, nn.Module):
             2 * action_space.shape[0] == num_outputs
         ), "Num outputs should be 2 * action dimension"
 
-        self.state_size = (
-            model_config["state_size"] if "state_size" in model_config else 16
-        )
-        self.nonlin_size = (
-            model_config["nonlin_size"] if "nonlin_size" in model_config else 128
-        )
+        self.state_size = model_config["state_size"] if "state_size" in model_config else 16
+        self.nonlin_size = model_config["nonlin_size"] if "nonlin_size" in model_config else 128
         self.input_size = obs_space.shape[0]
         self.output_size = action_space.shape[0]
 
@@ -78,9 +84,7 @@ class DissipativeThetaRINN(RecurrentNetwork, nn.Module):
 
         # self.deq = torchdeq.get_deq(f_solver="broyden", f_max_iter=30, b_max_iter=30)
         # self.deq = torchdeq.get_deq(f_solver="anderson", f_max_iter=30, b_max_iter=30)
-        self.deq = torchdeq.get_deq(
-            f_solver="fixed_point_iter", f_max_iter=30, b_max_iter=30
-        )
+        self.deq = torchdeq.get_deq(f_solver="fixed_point_iter", f_max_iter=30, b_max_iter=30)
 
         log_std_init = (
             model_config["log_std_init"]
@@ -92,15 +96,15 @@ class DissipativeThetaRINN(RecurrentNetwork, nn.Module):
         assert "dt" in model_config
         self.dt = model_config["dt"]
 
+        # fmt: off
+        n_layers = model_config["baseline_n_layers"] if "baseline_n_layers" in model_config else 2
+        layer_size = model_config["baseline_size"] if "baseline_size" in model_config else 64
+        # fmt: on
         self.value = build_mlp(
             input_size=obs_space.shape[0],
             output_size=1,
-            n_layers=model_config["baseline_n_layers"]
-            if "baseline_n_layers" in model_config
-            else 2,
-            size=model_config["baseline_size"]
-            if "baseline_size" in model_config
-            else 64,
+            n_layers=n_layers,
+            size=layer_size,
         )
         self._cur_value = None
 
@@ -130,75 +134,85 @@ class DissipativeThetaRINN(RecurrentNetwork, nn.Module):
         assert "plant" in model_config
         assert "plant_config" in model_config
         plant = model_config["plant"](model_config["plant_config"])
+        np_plant_params = plant.get_params()
+        self.plant_params = np_plant_params.np_to_torch(device=self.A_T.device)
+        assert self.state_size == self.plant_params.Ap.shape[0]
 
-        plant_params = plant.get_params()
-
-        self.Ap = from_numpy(plant_params["Ap"], device=self.Duw_T.device)
-        self.Bpw = from_numpy(plant_params["Bpw"], device=self.Duw_T.device)
-        self.Bpd = from_numpy(plant_params["Bpd"], device=self.Duw_T.device)
-        self.Bpu = from_numpy(plant_params["Bpu"], device=self.Duw_T.device)
-        self.Cpv = from_numpy(plant_params["Cpv"], device=self.Duw_T.device)
-        self.Dpvw = from_numpy(plant_params["Dpvw"], device=self.Duw_T.device)
-        self.Dpvd = from_numpy(plant_params["Dpvd"], device=self.Duw_T.device)
-        self.Dpvu = from_numpy(plant_params["Dpvu"], device=self.Duw_T.device)
-        self.Cpe = from_numpy(plant_params["Cpe"], device=self.Duw_T.device)
-        self.Dpew = from_numpy(plant_params["Dpew"], device=self.Duw_T.device)
-        self.Dped = from_numpy(plant_params["Dped"], device=self.Duw_T.device)
-        self.Dpeu = from_numpy(plant_params["Dpeu"], device=self.Duw_T.device)
-        self.Cpy = from_numpy(plant_params["Cpy"], device=self.Duw_T.device)
-        self.Dpyw = from_numpy(plant_params["Dpyw"], device=self.Duw_T.device)
-        self.Dpyd = from_numpy(plant_params["Dpyd"], device=self.Duw_T.device)
-
-        assert self.state_size == self.Ap.shape[0]
-
-        trs = model_config["trs"] if "trs" in model_config else None
+        trs_mode = model_config["trs_mode"] if "trs_mode" in model_config else "variable"
         min_trs = model_config["min_trs"] if "min_trs" in model_config else 1.0
 
-        self.projector = Projector(
-            **plant_params,
+        self.theta_projector = ThetaProjector(
+            np_plant_params,
             eps=self.eps,
             nonlin_size=self.nonlin_size,
             output_size=self.output_size,
             state_size=self.state_size,
             input_size=self.input_size,
-            trs=trs,
+        )
+
+        self.thetahat_projector = ThetahatProjector(
+            np_plant_params,
+            eps=self.eps,
+            nonlin_size=self.nonlin_size,
+            output_size=self.output_size,
+            state_size=self.state_size,
+            input_size=self.input_size,
+            trs_mode=trs_mode,
             min_trs=min_trs,
         )
 
-        self.P = torch.eye(2*self.state_size)
-        self.Lambda = torch.eye(self.nonlin_size)
+        if "P" in model_config:
+            self.P = from_numpy(model_config["P"], device=self.A_T.device)
+        else:
+            self.P = torch.eye(self.plant_params.Ap.shape[0] + self.state_size)
+        if "Lambda" in model_config:
+            self.Lambda = from_numpy(model_config["Lambda"], device=self.A_T.device)
+        else:
+            self.Lambda = torch.eye(self.nonlin_size)
 
         # Counts the number of times project is called.
         # It is assumed that project is called everytime the model parameters are updated.
         self.update_count = 0
 
         # The number of updates to wait before doing the first projection.
-        self.project_delay = model_config["project_delay"] if "project_delay" in model_config else 10
+        self.project_delay = (
+            model_config["project_delay"] if "project_delay" in model_config else 10
+        )
         # The number of updates to wait after a projection before doing the next one.
-        self.project_spacing = model_config["project_spacing"] if "project_spacing" in model_config else 5
+        self.project_spacing = (
+            model_config["project_spacing"] if "project_spacing" in model_config else 5
+        )
 
         self.oldtheta = None
-        
-        self.project()
 
+        self.project()
 
     def project(self):
         """Modify parameters to ensure existence and uniqueness of solution to implicit equation."""
-        is_dissipative = self.projector.verify_dissipativity(
-            to_numpy(self.A_T.t()), to_numpy(self.Bw_T.t()), to_numpy(self.By_T.t()), 
-            to_numpy(self.Cv_T.t()), to_numpy(self.Dvw_T.t()), to_numpy(self.Dvy_T.t()), 
-            to_numpy(self.Cu_T.t()), to_numpy(self.Duw_T.t()), to_numpy(self.Duy_T.t())
-        )
-        print(f"Already dissipative? {is_dissipative}")
-        if not is_dissipative:
-            with torch.no_grad():
-                if (
-                    self.update_count == self.project_delay 
-                    or (
-                        self.update_count > self.project_delay
-                        and (self.update_count - self.project_delay) % self.project_spacing == 0
-                    )
-                ):
+        with torch.no_grad():
+            # fmt: off
+            controller_params = ControllerThetaParameters(
+                self.A_T.t(), self.Bw_T.t(), self.By_T.t(),
+                self.Cv_T.t(), self.Dvw_T.t(), self.Dvy_T.t(),
+                self.Cu_T.t(), self.Duw_T.t(), self.Duy_T.t(),
+                self.Lambda
+            )
+            # fmt: on
+            is_dissipative, newP, newLambda = self.theta_projector.is_dissipative(
+                controller_params.torch_to_np(), to_numpy(self.P)
+            )
+            print(f"Is dissipative: {is_dissipative}")
+            if is_dissipative:
+                self.P = from_numpy(newP)
+                self.Lambda = from_numpy(newLambda)
+            else:
+                first_delay_complete = self.update_count == self.project_delay
+                delay_interval_complete = (
+                    self.update_count > self.project_delay
+                    and (self.update_count - self.project_delay) % self.project_spacing == 0
+                )
+
+                if first_delay_complete or delay_interval_complete:
                     print("Projection")
                     self.enforce_dissipativity()
                 else:
@@ -209,30 +223,19 @@ class DissipativeThetaRINN(RecurrentNetwork, nn.Module):
                     if max_abs_row_sum > 0.999:
                         self.Dvw_T = nn.Parameter(self.Dvw_T * 0.99 / max_abs_row_sum)
                         new_max_abs_row_sum = torch.linalg.matrix_norm(self.Dvw_T, ord=1)
-                        print(f"Reducing max abs row sum: {max_abs_row_sum} -> {new_max_abs_row_sum}")
+                        print(
+                            f"Reducing max abs row sum: {max_abs_row_sum} -> {new_max_abs_row_sum}"
+                        )
 
-                # max_gain = 1000.0 - 3*self.update_count
-                # missing, unexpected = self.load_state_dict(
-                #     {
-                #         "A_T": torch.clamp(self.A_T, min=-max_gain, max=max_gain),
-                #         "Bw_T": torch.clamp(self.Bw_T, min=-max_gain, max=max_gain),
-                #         "By_T": torch.clamp(self.By_T, min=-max_gain, max=max_gain),
-                #         "Cv_T": torch.clamp(self.Cv_T, min=-max_gain, max=max_gain),
-                #         "Dvw_T": torch.clamp(self.Dvw_T, min=-max_gain, max=max_gain),
-                #         "Dvy_T": torch.clamp(self.Dvy_T, min=-max_gain, max=max_gain),
-                #         "Cu_T": torch.clamp(self.Cu_T, min=-max_gain, max=max_gain),
-                #         "Duw_T": torch.clamp(self.Duw_T, min=-max_gain, max=max_gain),
-                #         "Duy_T": torch.clamp(self.Duy_T, min=-max_gain, max=max_gain),
-                #     },
-                #     strict=False,
-                # )
-        
+        self.update_count += 1
+
+        # fmt: off
         theta = torch.vstack((
             torch.hstack((self.A_T.t(),  self.Bw_T.t(), self.By_T.t())),
             torch.hstack((self.Cv_T.t(), self.Dvw_T.t(), self.Dvy_T.t())),
             torch.hstack((self.Cu_T.t(), self.Duw_T.t(), self.Duy_T.t()))
         ))
-
+        # fmt: on
         print_norms(self.A_T.t(), "Ak   ")
         print_norms(self.Bw_T.t(), "Bkw  ")
         print_norms(self.By_T.t(), "Bky  ")
@@ -243,12 +246,12 @@ class DissipativeThetaRINN(RecurrentNetwork, nn.Module):
         print_norms(self.Duw_T.t(), "Dkuw ")
         print_norms(self.Duy_T.t(), "Dkuy ")
         print_norms(theta, "theta")
-
         if self.oldtheta is not None:
-            print_norms(theta - self.oldtheta, f"theta - oldtheta: {torch.allclose(theta, self.oldtheta)}")
+            print_norms(
+                theta - self.oldtheta,
+                f"theta - oldtheta: {torch.allclose(theta, self.oldtheta)}",
+            )
         self.oldtheta = theta.detach().clone()
-
-        self.update_count += 1
 
     def enforce_dissipativity(self):
         """Checks if current thetahat parameters correspond to a controller
@@ -257,95 +260,58 @@ class DissipativeThetaRINN(RecurrentNetwork, nn.Module):
 
         Returns whether the module parameters have been modified."""
 
-        Duw, S, R, Lambda, NA11, NA12, NA21, NA22, NB, NC, Dvyhat, Dvwhat = self.construct_thetahat()
+        controller_params = self.construct_thetahat()
+        np_controller_params = controller_params.torch_to_np()
 
-        Dkuw = to_numpy(Duw)
-        S = to_numpy(S)
-        R = to_numpy(R)
-        Lambda = to_numpy(Lambda)
-        NA11 = to_numpy(NA11)
-        NA12 = to_numpy(NA12)
-        NA21 = to_numpy(NA21)
-        NA22 = to_numpy(NA22)
-        NB = to_numpy(NB)
-        NC = to_numpy(NC)
-        Dkvyhat = to_numpy(Dvyhat)
-        Dkvwhat = to_numpy(Dvwhat)
+        np_new_controller_params = self.thetahat_projector.project(np_controller_params)
+        new_thetahat = np_new_controller_params.np_to_torch(self.A_T.device)
 
-        (
-            oDkuw, oS, oR, oLambda,
-            oNA11, oNA12, oNA21, oNA22,
-            oNB, oNC, oDkvyhat, oDkvwhat,
-        ) = self.projector.project(
-            Dkuw=Dkuw, S=S, R=R, Lambda=Lambda, 
-            NA11=NA11, NA12=NA12, NA21=NA21, NA22=NA22, 
-            NB=NB, NC=NC, Dkvyhat=Dkvyhat, Dkvwhat=Dkvwhat,
-        )
-
-        device = self.A_T.device
-        Duw_T = from_numpy(oDkuw.T, device=device)
-        S = from_numpy(oS, device=device)
-        R = from_numpy(oR, device=device)
-        Lambda = from_numpy(oLambda, device=device)
-        NA11 = from_numpy(oNA11, device=device)
-        NA12 = from_numpy(oNA12, device=device)
-        NA21 = from_numpy(oNA21, device=device)
-        NA22 = from_numpy(oNA22, device=device)
-        NB = from_numpy(oNB, device=device)
-        NC = from_numpy(oNC, device=device)
-        Dvyhat = from_numpy(oDkvyhat, device=device)
-        Dvwhat = from_numpy(oDkvwhat, device=device)
-
-        A_T, Bw_T, By_T, Cv_T, Dvw_T, Dvy_T, Cu_T, Duw_T, Duy_T, P = self.construct_theta(
-            Duw_T, S, R, Lambda, NA11, NA12, NA21, NA22, NB, NC, Dvyhat, Dvwhat
-        )
+        new_theta, P = self.construct_theta(new_thetahat)
 
         self.P = P
-        self.Lambda = Lambda
+        self.Lambda = new_theta.Lambda
 
         missing, unexpected = self.load_state_dict(
             {
-                "A_T": A_T,
-                "Bw_T": Bw_T,
-                "By_T": By_T,
-                "Cv_T": Cv_T,
-                "Dvw_T": Dvw_T,
-                "Dvy_T": Dvy_T,
-                "Cu_T": Cu_T,
-                "Duw_T": Duw_T,
-                "Duy_T": Duy_T,
+                "A_T": new_theta.Ak.t(),
+                "Bw_T": new_theta.Bkw.t(),
+                "By_T": new_theta.Bky.t(),
+                "Cv_T": new_theta.Ckv.t(),
+                "Dvw_T": new_theta.Dkvw.t(),
+                "Dvy_T": new_theta.Dkvy.t(),
+                "Cu_T": new_theta.Cku.t(),
+                "Duw_T": new_theta.Dkuw.t(),
+                "Duy_T": new_theta.Dkuy.t(),
             },
             strict=False,
         )
-        assert (
-            unexpected == []
-        ), f"Loading unexpected key after projection: {unexpected}"
+        assert unexpected == [], f"Loading unexpected key after projection: {unexpected}"
+        # fmt: off
         assert missing == [
-            "log_stds",
-            "value.0.bias",
-            "value.0.weight_g",
-            "value.0.weight_v",
-            "value.2.bias",
-            "value.2.weight_g",
-            "value.2.weight_v",
-            "value.4.bias",
-            "value.4.weight_g",
-            "value.4.weight_v",
+            "log_stds", "value.0.bias", "value.0.weight_g", "value.0.weight_v",
+            "value.2.bias", "value.2.weight_g", "value.2.weight_v",
+            "value.4.bias", "value.4.weight_g", "value.4.weight_v",
         ], missing
+        # fmt: on
 
-    
     def construct_thetahat(self):
         """Constructs thetahat from RINN parameters, P, and Lambda."""
         Duw = self.Duw_T.t()
 
-        S = self.P[:self.state_size, :self.state_size]
-        U = self.P[:self.state_size, self.state_size:]
+        S = self.P[: self.state_size, : self.state_size]
+        U = self.P[: self.state_size, self.state_size :]
         if (not torch.allclose(S, S.t())) and (S - S.t()).abs().max() < self.eps:
-            print(f"S: {torch.allclose(S, S.t())}, {(S - S.t()).abs().max()}, {torch.linalg.eigvalsh(S).min()}")
-            S = (S + S.t())/2.0
-            print(f"S: {torch.allclose(S, S.t())}, {(S - S.t()).abs().max()}, {torch.linalg.eigvalsh(S).min()}")
+            print(
+                f"S: {torch.allclose(S, S.t())}, {(S - S.t()).abs().max()}, {torch.linalg.eigvalsh(S).min()}"
+            )
+            S = (S + S.t()) / 2.0
+            print(
+                f"S: {torch.allclose(S, S.t())}, {(S - S.t()).abs().max()}, {torch.linalg.eigvalsh(S).min()}"
+            )
         assert torch.allclose(S, S.t()), "S is not symmetric"
-        assert torch.linalg.eigvalsh(S).min() > self.eps, f"S min eigval is {torch.linalg.eigvalsh(S).min()}"
+        assert (
+            torch.linalg.eigvalsh(S).min() > self.eps
+        ), f"S min eigval is {torch.linalg.eigvalsh(S).min()}"
 
         # Pinv = self.P.inverse()
         # R = Pinv[:self.state_size, :self.state_size]
@@ -357,85 +323,94 @@ class DissipativeThetaRINN(RecurrentNetwork, nn.Module):
         # assert torch.allclose(R, R.t()), "R is not symmetric"
         # assert torch.linalg.eigvalsh(R).min() > self.eps, f"P min eigval is {torch.linalg.eigvalsh(R).min()}"
         # Solve P Y = Y2 for Y
+        # fmt: off
         Y2 = torch.vstack((
             torch.hstack((torch.eye(S.shape[0], device=S.device), S)),
             torch.hstack((S.new_zeros((U.t().shape[0], S.shape[0])), U.t()))
         ))
+        # fmt: on
         Y = torch.linalg.solve(self.P, Y2)
-        R = Y[:self.state_size, :self.state_size]
-        V = Y[self.state_size:, :self.state_size].t()
+        R = Y[: self.state_size, : self.state_size]
+        V = Y[self.state_size :, : self.state_size].t()
+        # fmt: off
         if (not torch.allclose(R, R.t())) and  (R - R.t()).abs().max() < self.eps:
             print(f"R: {torch.allclose(R, R.t())}, {(R - R.t()).abs().max()}, {torch.linalg.eigvalsh(R).min()}")
             R = (R + R.t())/2.0
             print(f"R: {torch.allclose(R, R.t())}, {(R - R.t()).abs().max()}, {torch.linalg.eigvalsh(R).min()}")
+        # fmt: on
         assert torch.allclose(R, R.t()), "R is not symmetric"
-        assert torch.linalg.eigvalsh(R).min() > self.eps, f"P min eigval is {torch.linalg.eigvalsh(R).min()}"
-        
-        print_norms(S, "cstorhat: S")
-        print_norms(R, "cstorhat: R")
-
-        print_norms(U, "cstorhat: U")
-        # print_norms(torch.linalg.inv(U), "cstorhat: Uinv")
-        print_norms(V, "cstorhat: V")
-        # print_norms(torch.linalg.inv(V), "cstorhat: Vinv")
+        assert (
+            torch.linalg.eigvalsh(R).min() > self.eps
+        ), f"P min eigval is {torch.linalg.eigvalsh(R).min()}"
 
         Lambda = self.Lambda
 
-        print_norms(Lambda, "cstorhat: Lambda")
-
         # NA = NA1 + NA2 NA3 NA4
 
-        NA111 = torch.mm(S, torch.mm(self.Ap, R))
-        NA112 = V.new_zeros((self.state_size, self.Cpy.shape[0]))
-        NA121 = V.new_zeros((self.Bpu.shape[1], self.state_size))
-        NA122 = V.new_zeros((self.Bpu.shape[1], self.Cpy.shape[0]))
+        Ap = self.plant_params.Ap
+        Bpu = self.plant_params.Bpu
+        Cpy = self.plant_params.Cpy
+
+        NA111 = torch.mm(S, torch.mm(Ap, R))
+        NA112 = V.new_zeros((self.state_size, Cpy.shape[0]))
+        NA121 = V.new_zeros((Bpu.shape[1], self.state_size))
+        NA122 = V.new_zeros((Bpu.shape[1], Cpy.shape[0]))
         NA1 = torch.vstack((torch.hstack((NA111, NA112)), torch.hstack((NA121, NA122))))
 
         NA211 = U
-        NA212 = torch.mm(S, self.Bpu)
-        NA221 = V.new_zeros((self.Bpu.shape[1], U.shape[1]))
-        NA222 = torch.eye(self.Bpu.shape[1], device=V.device)
+        NA212 = torch.mm(S, Bpu)
+        NA221 = V.new_zeros((Bpu.shape[1], U.shape[1]))
+        NA222 = torch.eye(Bpu.shape[1], device=V.device)
         NA2 = torch.vstack((torch.hstack((NA211, NA212)), torch.hstack((NA221, NA222))))
 
+        # fmt: off
         NA3 = torch.vstack((
             torch.hstack((self.A_T.t(), self.By_T.t())), 
             torch.hstack((self.Cu_T.t(), self.Duy_T.t()))
         ))
+        # fmt: on
 
         NA411 = V.t()
-        NA412 = V.new_zeros(V.shape[1], self.Cpy.shape[0])
-        NA421 = torch.mm(self.Cpy, R)
-        NA422 = torch.eye(self.Cpy.shape[0], device=V.device)
+        NA412 = V.new_zeros(V.shape[1], Cpy.shape[0])
+        NA421 = torch.mm(Cpy, R)
+        NA422 = torch.eye(Cpy.shape[0], device=V.device)
         NA4 = torch.vstack((torch.hstack((NA411, NA412)), torch.hstack((NA421, NA422))))
 
         NA = NA1 + torch.mm(NA2, torch.mm(NA3, NA4))
-        NA11 = NA[:self.state_size, :self.state_size]
-        NA12 = NA[:self.state_size, self.state_size:]
-        NA21 = NA[self.state_size:, :self.state_size]
-        NA22 = NA[self.state_size:, self.state_size:]
+        NA11 = NA[: self.state_size, : self.state_size]
+        NA12 = NA[: self.state_size, self.state_size :]
+        NA21 = NA[self.state_size :, : self.state_size]
+        NA22 = NA[self.state_size :, self.state_size :]
 
-        print_norms(NA, "cstorhat: NA")
-
-        NB = torch.mm(S, torch.mm(self.Bpu, self.Duw_T.t())) + torch.mm(U, self.Bw_T.t())
-        NC = torch.mm(Lambda, torch.mm(self.Dvy_T.t(), torch.mm(self.Cpy, R))) \
+        NB = torch.mm(S, torch.mm(Bpu, self.Duw_T.t())) + torch.mm(U, self.Bw_T.t())
+        # fmt: off
+        NC = torch.mm(Lambda, torch.mm(self.Dvy_T.t(), torch.mm(Cpy, R))) \
             + torch.mm(Lambda, torch.mm(self.Cv_T.t(), V.t()))
-        
+        # fmt: on
+
         Dvyhat = torch.mm(Lambda, self.Dvy_T.t())
         Dvwhat = torch.mm(Lambda, self.Dvw_T.t())
 
-        print_norms(NB, "cstorhat: NB")
-        print_norms(NC, "cstorhat: NC")
-        print_norms(Dvyhat, "cstorhat: Dvyhat")
-        print_norms(Dvwhat, "cstorhat: Dvwhat")
+        return ControllerThetahatParameters(
+            S, R, NA11, NA12, NA21, NA22, NB, NC, Duw, Dvyhat, Dvwhat, Lambda
+        )
 
-        return Duw, S, R, Lambda, NA11, NA12, NA21, NA22, NB, NC, Dvyhat, Dvwhat
-
-
-    def construct_theta(
-            self, Duw_T, S, R, Lambda, NA11, NA12, NA21, NA22, NB, NC, Dvyhat, Dvwhat
-        ):
+    def construct_theta(self, thetahat: ControllerThetahatParameters):
         """Construct theta, the parameters of the controller, from thetahat,
         the decision variables for the dissipativity condition."""
+
+        S = thetahat.S
+        R = thetahat.R
+        NA11 = thetahat.NA11
+        NA12 = thetahat.NA12
+        NA21 = thetahat.NA21
+        NA22 = thetahat.NA22
+        NB = thetahat.NB
+        NC = thetahat.NC
+        Duw_T = thetahat.Dkuw.t()
+        Dvyhat = thetahat.Dkvyhat
+        Dvwhat = thetahat.Dkvwhat
+        Lambda = thetahat.Lambda
 
         # torch.linalg.solve(A, B) solves for X in AX = B, and assumes A is invertible
 
@@ -445,15 +420,12 @@ class DissipativeThetaRINN(RecurrentNetwork, nn.Module):
         #     V, torch.eye(self.state_size, device=V.device) - torch.mm(R, S)
         # ).t()
 
-        svdU, svdSigma, svdV_T = torch.linalg.svd(torch.eye(self.state_size, device=R.device) - torch.mm(R, S))
+        svdU, svdSigma, svdV_T = torch.linalg.svd(
+            torch.eye(self.state_size, device=R.device) - torch.mm(R, S)
+        )
         sqrt_svdSigma = svdSigma.sqrt().diag()
         V = torch.mm(svdU, sqrt_svdSigma)
         U = torch.mm(svdV_T.t(), sqrt_svdSigma)
-
-        print_norms(U, "cstor: U")
-        print_norms(torch.linalg.inv(U), "cstor: Uinv")
-        print_norms(V, "cstor: V")
-        print_norms(torch.linalg.inv(V), "cstor: Vinv")
 
         try:
             V.inverse()
@@ -465,6 +437,7 @@ class DissipativeThetaRINN(RecurrentNetwork, nn.Module):
             assert False, f"U not invertible: {e.message}"
 
         # Construct P via P = [I, S; 0, U^T] Y^-1
+        # fmt: off
         Y = torch.vstack((
             torch.hstack((R, torch.eye(R.shape[0], device=R.device))),
             torch.hstack((V.t(), V.new_zeros((V.t().shape[0], R.shape[0]))))
@@ -473,13 +446,22 @@ class DissipativeThetaRINN(RecurrentNetwork, nn.Module):
             torch.hstack((torch.eye(S.shape[0], device=S.device), S)),
             torch.hstack((V.new_zeros((U.t().shape[0], S.shape[0])), U.t()))
         ))
+        # fmt: on
         P = torch.linalg.solve(Y.t(), Y2.t())
-        if (not torch.allclose(P, P.t())) and  (P - P.t()).abs().max() < self.eps:
-            print(f"P: {torch.allclose(P, P.t())}, {(P - P.t()).abs().max()}, {torch.linalg.eigvalsh(P).min()}")
-            P = (P + P.t())/2.0
-            print(f"P: {torch.allclose(P, P.t())}, {(P- P.t()).abs().max()}, {torch.linalg.eigvalsh(P).min()}")
-        assert torch.allclose(P, P.t()), f"P is not even symmetric: max abs error: {(P - P.t()).abs().max()}"
-        assert torch.linalg.eigvalsh(P).min() > 0, f"P min eigval is {torch.linalg.eigvalsh(P).min()}"
+        if (not torch.allclose(P, P.t())) and (P - P.t()).abs().max() < self.eps:
+            print(
+                f"P: {torch.allclose(P, P.t())}, {(P - P.t()).abs().max()}, {torch.linalg.eigvalsh(P).min()}"
+            )
+            P = (P + P.t()) / 2.0
+            print(
+                f"P: {torch.allclose(P, P.t())}, {(P- P.t()).abs().max()}, {torch.linalg.eigvalsh(P).min()}"
+            )
+        assert torch.allclose(
+            P, P.t()
+        ), f"P is not even symmetric: max abs error: {(P - P.t()).abs().max()}"
+        assert (
+            torch.linalg.eigvalsh(P).min() > 0
+        ), f"P min eigval is {torch.linalg.eigvalsh(P).min()}"
 
         # Reconstruct Dvy and Dvw from Dvyhat and Dvwhat
         Dvy = torch.linalg.solve(Lambda, Dvyhat)
@@ -515,55 +497,38 @@ class DissipativeThetaRINN(RecurrentNetwork, nn.Module):
         # Cu = NA3[self.state_size :, : self.state_size]
         # Duy = NA3[self.state_size :, self.state_size :]
 
+        Ap = self.plant_params.Ap
+        Bpu = self.plant_params.Bpu
+        Cpy = self.plant_params.Cpy
+
         Duy = NA22
-        By = torch.linalg.solve(U, NA12 - S @ self.Bpu @ Duy)
-        Cu = torch.linalg.solve(V, NA21.t() - R @ self.Cpy.t() @ Duy.t()).t()
+        By = torch.linalg.solve(U, NA12 - S @ Bpu @ Duy)
+        Cu = torch.linalg.solve(V, NA21.t() - R @ Cpy.t() @ Duy.t()).t()
         AVT = torch.linalg.solve(
             U,
-            NA11 \
-                - U @ By @ self.Cpy @ R \
-                - S @ self.Bpu @ (Cu @ V.t() + Duy @ self.Cpy @ R) \
-                - S @ self.Ap @ R
+            NA11
+            - U @ By @ Cpy @ R
+            - S @ Bpu @ (Cu @ V.t() + Duy @ Cpy @ R)
+            - S @ Ap @ R,
         )
         A = torch.linalg.solve(V, AVT.t()).t()
 
         # Solve for Bw from NB
         # NB = NB1 + U Bw
-        NB1 = torch.mm(S, torch.mm(self.Bpu, Duw_T.t()))
+        NB1 = torch.mm(S, torch.mm(Bpu, Duw_T.t()))
         Bw = torch.linalg.solve(U, NB - NB1)
 
         # Solve for Cv from NC
         # NC = NC1 + Lambda Cv V^T
-        NC1 = torch.mm(Dvyhat, torch.mm(self.Cpy, R))
+        NC1 = torch.mm(Dvyhat, torch.mm(Cpy, R))
         CvVT = torch.linalg.solve(Lambda, NC - NC1)
         Cv = torch.linalg.solve(V, CvVT.t()).t()
 
         # Bring together the theta parameters here
-        A_T = A.t()
-        Bw_T = Bw.t()
-        By_T = By.t()
-
-        Cv_T = Cv.t()
-        Dvw_T = Dvw.t()
-        Dvy_T = Dvy.t()
-
-        Cu_T = Cu.t()
-        # Duw_T is already a parameter
-        Duy_T = Duy.t()
-
-        assert self.A_T.shape == (self.state_size, self.state_size)
-        assert self.Bw_T.shape == (self.nonlin_size, self.state_size)
-        assert self.By_T.shape == (self.input_size, self.state_size)
-
-        assert self.Cv_T.shape == (self.state_size, self.nonlin_size)
-        assert self.Dvw_T.shape == (self.nonlin_size, self.nonlin_size)
-        assert self.Dvy_T.shape == (self.input_size, self.nonlin_size)
-
-        assert self.Cu_T.shape == (self.state_size, self.output_size)
-        assert self.Duw_T.shape == (self.nonlin_size, self.output_size)
-        assert self.Duy_T.shape == (self.input_size, self.output_size)
-
-        return A_T, Bw_T, By_T, Cv_T, Dvw_T, Dvy_T, Cu_T, Duw_T, Duy_T, P 
+        controller_params = ControllerThetaParameters(
+            A, Bw, By, Cv, Dvw, Dvy, Cu, Duw_T.t(), Duy, Lambda
+        )
+        return controller_params, P
 
     @override(ModelV2)
     def get_initial_state(self):
@@ -656,9 +621,7 @@ class DissipativeThetaRINN(RecurrentNetwork, nn.Module):
                 wk, info = self.deq(delta_tilde, wk0)
                 assert len(wk) > 0
                 wk = wk[-1]
-            assert not torch.any(
-                torch.isnan(wk)
-            ), f"At time {k}, wk has nans: {wk}, {info}"
+            assert not torch.any(torch.isnan(wk)), f"At time {k}, wk has nans: {wk}, {info}"
 
             uk = xk @ self.Cu_T + wk @ self.Duw_T + yk @ self.Duy_T
             actions[:, k] = uk

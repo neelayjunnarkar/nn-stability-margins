@@ -1,9 +1,11 @@
 # Dissipative code using the condition that is a BMI in controller parameters and storage function.
-import numpy as np
-import cvxpy as cp
 import time
 
-from variable_structs import PlantParameters, ControllerThetaParameters
+import cvxpy as cp
+import numpy as np
+
+from variable_structs import ControllerThetaParameters, PlantParameters
+
 
 def is_positive_semidefinite(X):
     if not np.allclose(X, X.T):
@@ -12,6 +14,7 @@ def is_positive_semidefinite(X):
     if np.min(eigvals) < 0:
         return False, f"Minimum eigenvalue {np.min(eigvals)} < 0"
     return True
+
 
 def is_positive_definite(X):
     # Check symmetric.
@@ -26,9 +29,7 @@ def is_positive_definite(X):
 
 
 def construct_dissipativity_matrix(
-    A, Bw, Bd, Cv, Dvw, Dvd, Ce, Dew, Ded,
-    P, LDelta, Mvw, Mww, Xdd, Xde, LX,
-    stacker
+    A, Bw, Bd, Cv, Dvw, Dvd, Ce, Dew, Ded, P, LDelta, Mvw, Mww, Xdd, Xde, LX, stacker
 ):
     if stacker == "numpy":
         stacker = np.bmat
@@ -40,6 +41,7 @@ def construct_dissipativity_matrix(
     # F = F1 + F2 + F3
     # where F1 has A^T P + P A, F2 is term with M, and F3 is term with X
 
+    # fmt: off
     F1 = stacker([
         [A.T @ P + P @ A, P @ Bw, P @ Bd],
         [Bw.T @ P, np.zeros((Bw.shape[1], Bw.shape[1] + Bd.shape[1]))],
@@ -71,14 +73,15 @@ def construct_dissipativity_matrix(
         [H, -np.eye(H.shape[0])]
     ])
 
-    # mat = mat[:4, :4]
+    # fmt: on
     return mat
+
 
 def construct_closed_loop(
     plant_params: PlantParameters,
     LDeltap,
     controller_params: ControllerThetaParameters,
-    stacker
+    stacker,
 ):
     Ap = plant_params.Ap
     Bpw = plant_params.Bpw
@@ -116,6 +119,7 @@ def construct_closed_loop(
     else:
         raise ValueError(f"Stacker {stacker} must be 'numpy' or 'cvxpy'.")
 
+    # fmt: off
     A = stacker([
         [Ap + Bpu @ Dkuy @ Cpy, Bpu @ Cku],
         [Bky @ Cpy, Ak]
@@ -163,9 +167,10 @@ def construct_closed_loop(
         [MDeltapww, np.zeros((MDeltapww.shape[0], Lambda.shape[1]))],
         [np.zeros((Lambda.shape[0], MDeltapww.shape[1])), -2*Lambda]
     ])
+    # fmt: on
 
     return A, Bw, Bd, Cv, Dvw, Dvd, Ce, Dew, Ded, LDelta, Mvw, Mww
-    
+
 
 class Projector:
     """Projection and verification related to dissipativity BMI."""
@@ -176,7 +181,10 @@ class Projector:
         # Epsilon to be used in enforcing definiteness of conditions
         eps,
         # Dimensions of variables for controller
-        nonlin_size, output_size, state_size, input_size,
+        nonlin_size,
+        output_size,
+        state_size,
+        input_size,
     ):
         self.plant_params = plant_params
         self.eps = eps
@@ -212,10 +220,12 @@ class Projector:
         pprojCku = cp.Parameter((self.output_size, self.state_size))
         pprojDkuw = cp.Parameter((self.output_size, self.nonlin_size))
         pprojDkuy = cp.Parameter((self.output_size, self.input_size))
+        # fmt: off
         self.pproj_k = ControllerThetaParameters(
             pprojAk, pprojBkw, pprojBky, pprojCkv, pprojDkvw, pprojDkvy,
             pprojCku, pprojDkuw, pprojDkuy, pprojLambda
         )
+        # fmt: on
 
         # Variables
         vprojAk = cp.Variable((self.state_size, self.state_size))
@@ -227,10 +237,12 @@ class Projector:
         vprojCku = cp.Variable((self.output_size, self.state_size))
         vprojDkuw = cp.Variable((self.output_size, self.nonlin_size))
         vprojDkuy = cp.Variable((self.output_size, self.input_size))
+        # fmt: off
         self.vproj_k = ControllerThetaParameters(
             vprojAk, vprojBkw, vprojBky, vprojCkv, vprojDkvw, vprojDkvy,
             vprojCku, vprojDkuw, vprojDkuy, None,
         )
+
 
         controller_params = ControllerThetaParameters(
             vprojAk, vprojBkw, vprojBky, vprojCkv, vprojDkvw, vprojDkvy,
@@ -245,6 +257,7 @@ class Projector:
             self.plant_params.Xdd, self.plant_params.Xde, self.LX,
             "cvxpy"
         )
+        # fmt: on
 
         constraints = [
             self.pprojP >> self.eps * np.eye(self.pprojP.shape[0]),
@@ -252,6 +265,7 @@ class Projector:
             mat << 0,
         ]
 
+        # fmt: off
         cost_projection_error = sum([
             cp.sum_squares(pprojAk - vprojAk),
             cp.sum_squares(pprojBkw - vprojBkw),
@@ -274,12 +288,17 @@ class Projector:
             cp.sum_squares(vprojDkuw),
             cp.sum_squares(vprojDkuy),
         ])
+        # fmt: on
         objective = cost_projection_error
 
         self.proj_problem = cp.Problem(cp.Minimize(objective), constraints)
 
     def project(
-        self, controller_params: ControllerThetaParameters, P, solver=cp.MOSEK, **kwargs,
+        self,
+        controller_params: ControllerThetaParameters,
+        P,
+        solver=cp.MOSEK,
+        **kwargs,
     ):
         """Projects input variables to set corresponding to dissipative controllers."""
         self.pproj_k.Ak.value = controller_params.Ak
@@ -314,17 +333,19 @@ class Projector:
             raise Exception()
         print(f"Projection objective: {self.proj_problem.value}")
 
+        # fmt: off
         new_controller_params = ControllerThetaParameters(
             self.vproj_k.Ak.value, self.vproj_k.Bkw.value, self.vproj_k.Bky.value,
             self.vproj_k.Ckv.value, self.vproj_k.Dkvw.value, self.vproj_k.Dkvy.value,
             self.vproj_k.Cku.value, self.vproj_k.Dkuw.value, self.vproj_k.Dkuy.value,
             None
         )
+        # fmt: on
 
         return new_controller_params
-    
+
     def _construct_check_dissipativity_problem(self):
-        # Define dissipativity verification problem: find if there exist P and Lambda 
+        # Define dissipativity verification problem: find if there exist P and Lambda
         # that certify a given controller is dissipative.
         # Parameters
         plant_state_size = self.plant_params.Ap.shape[0]
@@ -340,16 +361,19 @@ class Projector:
         pcheckCku = cp.Parameter((self.output_size, self.state_size))
         pcheckDkuw = cp.Parameter((self.output_size, self.nonlin_size))
         pcheckDkuy = cp.Parameter((self.output_size, self.input_size))
+        # fmt: off
         self.pcheck_k = ControllerThetaParameters(
             pcheckAk, pcheckBkw, pcheckBky, pcheckCkv, pcheckDkvw, pcheckDkvy,
             pcheckCku, pcheckDkuw, pcheckDkuy, pcheckLambda
         )
+        # fmt: on
 
         # Variables
         self.vcheckP = cp.Variable((P_size, P_size), PSD=True)
         self.vcheckLambda = cp.Variable((self.nonlin_size, self.nonlin_size), diag=True)
         self.vcheckEps = cp.Variable(nonneg=True)
 
+        # fmt: off
         controller_params = ControllerThetaParameters(
             pcheckAk, pcheckBkw, pcheckBky, pcheckCkv, pcheckDkvw, pcheckDkvy,
             pcheckCku, pcheckDkuw, pcheckDkuy, self.vcheckLambda
@@ -363,6 +387,7 @@ class Projector:
             self.plant_params.Xdd, self.plant_params.Xde, self.LX,
             "cvxpy"
         )
+        # fmt: on
 
         constraints = [
             self.vcheckP >> self.eps * np.eye(self.vcheckP.shape[0]),
@@ -371,6 +396,7 @@ class Projector:
             self.vcheckEps >= 0,
         ]
 
+        # fmt: off
         cost_projection_error = sum([
             cp.sum_squares(self.vcheckP - self.pcheckP),
             cp.sum_squares(self.vcheckLambda - self.pcheck_k.Lambda),
@@ -379,12 +405,17 @@ class Projector:
             cp.sum_squares(self.vcheckP),
             cp.sum_squares(self.vcheckLambda),
         ])
+        # fmt: on
         objective = -self.vcheckEps
 
         self.check_problem = cp.Problem(cp.Minimize(objective), constraints)
 
     def is_dissipative(
-        self, controller_params: ControllerThetaParameters, P, solver=cp.MOSEK, **kwargs,
+        self,
+        controller_params: ControllerThetaParameters,
+        P,
+        solver=cp.MOSEK,
+        **kwargs,
     ):
         """Checks if there exist P and Lambda that certify the controller is dissipative."""
         self.pcheck_k.Ak.value = controller_params.Ak
@@ -397,6 +428,7 @@ class Projector:
         self.pcheck_k.Dkuw.value = controller_params.Dkuw
         self.pcheck_k.Dkuy.value = controller_params.Dkuy
         self.pcheck_k.Lambda.value = controller_params.Lambda
+        print(P)
         self.pcheckP.value = P
 
         try:

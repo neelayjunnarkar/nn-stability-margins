@@ -204,7 +204,9 @@ class DissipativeThetaRINN(RecurrentNetwork, nn.Module):
             print(f"Is dissipative: {is_dissipative}")
             if is_dissipative:
                 self.P = from_numpy(newP)
+                self.P = 0.5 * (self.P + self.P.t())
                 self.Lambda = from_numpy(newLambda)
+                self.Lambda = 0.5 * (self.Lambda + self.Lambda.t())
             else:
                 first_delay_complete = self.update_count == self.project_delay
                 delay_interval_complete = (
@@ -299,15 +301,16 @@ class DissipativeThetaRINN(RecurrentNetwork, nn.Module):
         Duw = self.Duw_T.t()
 
         S = self.P[: self.state_size, : self.state_size]
+        S = 0.5 * (S + S.t())
         U = self.P[: self.state_size, self.state_size :]
-        if (not torch.allclose(S, S.t())) and (S - S.t()).abs().max() < self.eps:
-            print(
-                f"S: {torch.allclose(S, S.t())}, {(S - S.t()).abs().max()}, {torch.linalg.eigvalsh(S).min()}"
-            )
-            S = (S + S.t()) / 2.0
-            print(
-                f"S: {torch.allclose(S, S.t())}, {(S - S.t()).abs().max()}, {torch.linalg.eigvalsh(S).min()}"
-            )
+        # if (not torch.allclose(S, S.t())) and (S - S.t()).abs().max() < self.eps:
+        #     print(
+        #         f"S: {torch.allclose(S, S.t())}, {(S - S.t()).abs().max()}, {torch.linalg.eigvalsh(S).min()}"
+        #     )
+        #     S = (S + S.t()) / 2.0
+        #     print(
+        #         f"S: {torch.allclose(S, S.t())}, {(S - S.t()).abs().max()}, {torch.linalg.eigvalsh(S).min()}"
+        #     )
         assert torch.allclose(S, S.t()), "S is not symmetric"
         assert (
             torch.linalg.eigvalsh(S).min() > self.eps
@@ -331,12 +334,13 @@ class DissipativeThetaRINN(RecurrentNetwork, nn.Module):
         # fmt: on
         Y = torch.linalg.solve(self.P, Y2)
         R = Y[: self.state_size, : self.state_size]
+        R = 0.5 * (R + R.t())
         V = Y[self.state_size :, : self.state_size].t()
         # fmt: off
-        if (not torch.allclose(R, R.t())) and  (R - R.t()).abs().max() < self.eps:
-            print(f"R: {torch.allclose(R, R.t())}, {(R - R.t()).abs().max()}, {torch.linalg.eigvalsh(R).min()}")
-            R = (R + R.t())/2.0
-            print(f"R: {torch.allclose(R, R.t())}, {(R - R.t()).abs().max()}, {torch.linalg.eigvalsh(R).min()}")
+        # if (not torch.allclose(R, R.t())) and  (R - R.t()).abs().max() < self.eps:
+        #     print(f"R: {torch.allclose(R, R.t())}, {(R - R.t()).abs().max()}, {torch.linalg.eigvalsh(R).min()}")
+        #     R = (R + R.t())/2.0
+        #     print(f"R: {torch.allclose(R, R.t())}, {(R - R.t()).abs().max()}, {torch.linalg.eigvalsh(R).min()}")
         # fmt: on
         assert torch.allclose(R, R.t()), "R is not symmetric"
         assert (
@@ -344,6 +348,7 @@ class DissipativeThetaRINN(RecurrentNetwork, nn.Module):
         ), f"P min eigval is {torch.linalg.eigvalsh(R).min()}"
 
         Lambda = self.Lambda
+        Lambda = 0.5 * (Lambda + Lambda.t())
 
         # NA = NA1 + NA2 NA3 NA4
 
@@ -448,14 +453,15 @@ class DissipativeThetaRINN(RecurrentNetwork, nn.Module):
         ))
         # fmt: on
         P = torch.linalg.solve(Y.t(), Y2.t())
-        if (not torch.allclose(P, P.t())) and (P - P.t()).abs().max() < self.eps:
-            print(
-                f"P: {torch.allclose(P, P.t())}, {(P - P.t()).abs().max()}, {torch.linalg.eigvalsh(P).min()}"
-            )
-            P = (P + P.t()) / 2.0
-            print(
-                f"P: {torch.allclose(P, P.t())}, {(P- P.t()).abs().max()}, {torch.linalg.eigvalsh(P).min()}"
-            )
+        P = 0.5 * (P + P.t())
+        # if (not torch.allclose(P, P.t())) and (P - P.t()).abs().max() < self.eps:
+        #     print(
+        #         f"P: {torch.allclose(P, P.t())}, {(P - P.t()).abs().max()}, {torch.linalg.eigvalsh(P).min()}"
+        #     )
+        #     P = (P + P.t()) / 2.0
+        #     print(
+        #         f"P: {torch.allclose(P, P.t())}, {(P- P.t()).abs().max()}, {torch.linalg.eigvalsh(P).min()}"
+        #     )
         assert torch.allclose(
             P, P.t()
         ), f"P is not even symmetric: max abs error: {(P - P.t()).abs().max()}"

@@ -2,11 +2,33 @@ import numpy as np
 import cvxpy as cp
 import time
 
+from variable_structs import PlantParameters, ControllerThetahatParameters
+
+def is_positive_semidefinite(X):
+    if not np.allclose(X, X.T):
+        return False
+    eigvals, _eigvecs = np.linalg.eigh(X)
+    if np.min(eigvals) < 0:
+        return False
+    return True
+
+def is_positive_definite(X):
+    # Check symmetric.
+    if not np.allclose(X, X.T):
+        return False
+    # Check PD (np.linalg.cholesky does not check for symmetry)
+    try:
+        np.linalg.cholesky(X)
+    except Exception as _e:
+        return False
+    return True
 
 def construct_dissipativity_matrix(
-    Dkuw, S, R, Lambda, NA11, NA12, NA21, NA22, NB, NC, Dkvyhat, Dkvwhat,
-    Ap, Bpw, Bpd, Bpu, Cpv, Dpvw, Dpvd, Dpvu, Cpe, Dpew, Dped, Dpeu, Cpy,
-    Dpyw, Dpyd, LDeltap, MDeltapvw, MDeltapww, Xdd, Xde, LX, stacker,
+    plant_params: PlantParameters,
+    LDeltap,
+    LX,
+    controller_params: ControllerThetahatParameters,
+    stacker
 ):
     if stacker == "numpy":
         stacker = np.bmat
@@ -15,76 +37,79 @@ def construct_dissipativity_matrix(
     else:
         raise ValueError(f"Stacker {stacker} must be 'numpy' or 'cvxpy'.")
 
-    ytpay11 = Ap @ R + Bpu @ NA21
-    ytpay12 = Ap + Bpu @ NA22 @ Cpy
-    ytpay21 = NA11
-    ytpay22 = S @ Ap + NA12 @ Cpy
+    K = controller_params
+    P = plant_params
+
+    ytpay11 = P.Ap @ K.R + P.Bpu @ K.NA21
+    ytpay12 = P.Ap + P.Bpu @ K.NA22 @ P.Cpy
+    ytpay21 = K.NA11
+    ytpay22 = K.S @ P.Ap + K.NA12 @ P.Cpy
     ytpay = stacker([[ytpay11, ytpay12], [ytpay21, ytpay22]])
 
-    ytpbw11 = Bpw + Bpu @ NA22 @ Dpyw
-    ytpbw12 = Bpu @ Dkuw
-    ytpbw21 = S @ Bpw + NA12 @ Dpyw
-    ytpbw22 = NB
+    ytpbw11 = P.Bpw + P.Bpu @ K.NA22 @ P.Dpyw
+    ytpbw12 = P.Bpu @ K.Dkuw
+    ytpbw21 = K.S @ P.Bpw + K.NA12 @ P.Dpyw
+    ytpbw22 = K.NB
     ytpbw = stacker([[ytpbw11, ytpbw12], [ytpbw21, ytpbw22]])
 
-    ytpbd1 = Bpd + Bpu @ NA22 @ Dpyd
-    ytpbd2 = S @ Bpd + NA12 @ Dpyd
+    ytpbd1 = P.Bpd + P.Bpu @ K.NA22 @ P.Dpyd
+    ytpbd2 = K.S @ P.Bpd + K.NA12 @ P.Dpyd
     ytpbd = stacker([[ytpbd1], [ytpbd2]])
 
-    mvwtcvy11 = MDeltapvw.T @ Cpv @ R + MDeltapvw.T @ Dpvu @ NA21
-    mvwtcvy12 = MDeltapvw.T @ Cpv + MDeltapvw.T @ Dpvu @ NA22 @ Cpy
-    mvwtcvy21 = NC
-    mvwtcvy22 = Dkvyhat @ Cpy
+    mvwtcvy11 = P.MDeltapvw.T @ P.Cpv @ K.R + P.MDeltapvw.T @ P.Dpvu @ K.NA21
+    mvwtcvy12 = P.MDeltapvw.T @ P.Cpv + P.MDeltapvw.T @ P.Dpvu @ K.NA22 @ P.Cpy
+    mvwtcvy21 = K.NC
+    mvwtcvy22 = K.Dkvyhat @ P.Cpy
     mvwtcvy = stacker([[mvwtcvy11, mvwtcvy12], [mvwtcvy21, mvwtcvy22]])
 
-    nxdecey1 = -Xde @ (Cpe @ R + Dpeu @ NA21)
-    nxdecey2 = -Xde @ (Cpe + Dpeu @ NA22 @ Cpy)
+    nxdecey1 = -P.Xde @ (P.Cpe @ K.R + P.Dpeu @ K.NA21)
+    nxdecey2 = -P.Xde @ (P.Cpe + P.Dpeu @ K.NA22 @ P.Cpy)
     nxdecey = stacker([[nxdecey1, nxdecey2]])
 
-    ldeltacvy11 = LDeltap @ (Cpv @ R + Dpvu @ NA21)
-    ldeltacvy12 = LDeltap @ (Cpv + Dpvu @ NA22 @ Cpy)
+    ldeltacvy11 = LDeltap @ (P.Cpv @ K.R + P.Dpvu @ K.NA21)
+    ldeltacvy12 = LDeltap @ (P.Cpv + P.Dpvu @ K.NA22 @ P.Cpy)
     ldeltacvy1 = stacker([[ldeltacvy11, ldeltacvy12]])
 
-    lxcey1 = LX @ (Cpe @ R + Dpeu @ NA21)
-    lxcey2 = LX @ (Cpe + Dpeu @ NA22 @ Cpy)
+    lxcey1 = LX @ (P.Cpe @ K.R + P.Dpeu @ K.NA21)
+    lxcey2 = LX @ (P.Cpe + P.Dpeu @ K.NA22 @ P.Cpy)
     lxcey = stacker([[lxcey1, lxcey2]])
 
-    mvwtdvw11 = MDeltapvw.T @ (Dpvw + Dpvu @ NA22 @ Dpyw)
-    mvwtdvw12 = MDeltapvw.T @ Dpvu @ Dkuw
-    mvwtdvw21 = Dkvyhat @ Dpyw
-    mvwtdvw22 = Dkvwhat
+    mvwtdvw11 = P.MDeltapvw.T @ (P.Dpvw + P.Dpvu @ K.NA22 @ P.Dpyw)
+    mvwtdvw12 = P.MDeltapvw.T @ P.Dpvu @ K.Dkuw
+    mvwtdvw21 = K.Dkvyhat @ P.Dpyw
+    mvwtdvw22 = K.Dkvwhat
     mvwtdvw = stacker([[mvwtdvw11, mvwtdvw12], [mvwtdvw21, mvwtdvw22]])
 
-    mvwtdvd1 = MDeltapvw.T @ (Dpvd + Dpvu @ NA22 @ Dpyd)
-    mvwtdvd2 = Dkvyhat @ Dpyd
+    mvwtdvd1 = P.MDeltapvw.T @ (P.Dpvd + P.Dpvu @ K.NA22 @ P.Dpyd)
+    mvwtdvd2 = K.Dkvyhat @ P.Dpyd
     mvwtdvd = stacker([[mvwtdvd1], [mvwtdvd2]])
 
     Mww = stacker([
-        [MDeltapww, np.zeros((MDeltapww.shape[0], Lambda.shape[1]))],
-        [np.zeros((Lambda.shape[0], MDeltapww.shape[1])), -2 * Lambda],
+        [P.MDeltapww, np.zeros((P.MDeltapww.shape[0], K.Lambda.shape[1]))],
+        [np.zeros((K.Lambda.shape[0], P.MDeltapww.shape[1])), -2 * K.Lambda],
     ])
 
-    Dew = stacker([[Dpew + Dpeu @ NA22 @ Dpyw, Dpew @ Dkuw]])
+    Dew = stacker([[P.Dpew + P.Dpeu @ K.NA22 @ P.Dpyw, P.Dpew @ K.Dkuw]])
 
-    Ded = Dped + Dpeu @ NA22 @ Dpyd
+    Ded = P.Dped + P.Dpeu @ K.NA22 @ P.Dpyd
 
     ldeltadvw1 = stacker(
-        [[LDeltap @ (Dpvw + Dpvu @ NA22 @ Dpyw), LDeltap @ Dpvu @ Dkuw]]
+        [[LDeltap @ (P.Dpvw + P.Dpvu @ K.NA22 @ P.Dpyw), LDeltap @ P.Dpvu @ K.Dkuw]]
     )
 
-    ldeltadvd1 = LDeltap @ (Dpvd + Dpvu @ NA22 @ Dpyd)
+    ldeltadvd1 = LDeltap @ (P.Dpvd + P.Dpvu @ K.NA22 @ P.Dpyd)
 
     # Define half the matrix and then add it to its transpose
     # Ensure Mww is symmetric. It needs to be for the method overall anyway.
-    assert np.allclose(MDeltapww, MDeltapww.T)
+    assert np.allclose(P.MDeltapww, P.MDeltapww.T)
     # Ensure Xdd is symmetric. It needs to be for the method overall anyway.
-    assert np.allclose(Xdd, Xdd.T)
+    assert np.allclose(P.Xdd, P.Xdd.T)
     row1 = stacker([[
         ytpay.T,
         np.zeros((
             ytpay.T.shape[0],
             mvwtdvw.shape[1]
-            + Xdd.shape[1]
+            + P.Xdd.shape[1]
             + LDeltap.shape[0]
             + LX.shape[0],
         )),
@@ -93,13 +118,13 @@ def construct_dissipativity_matrix(
         ytpbw.T + mvwtcvy,
         mvwtdvw + 0.5 * Mww,
         np.zeros(
-            (ytpbw.T.shape[0], Xdd.shape[1] + LDeltap.shape[0] + LX.shape[0])
+            (ytpbw.T.shape[0], P.Xdd.shape[1] + LDeltap.shape[0] + LX.shape[0])
         ),
     ]])
     row3 = stacker([[
         ytpbd.T + nxdecey,
-        mvwtdvd.T - Xde @ Dew,
-        -Xde @ Ded - 0.5 * Xdd,
+        mvwtdvd.T - P.Xde @ Dew,
+        -P.Xde @ Ded - 0.5 * P.Xdd,
         np.zeros((ytpbd.T.shape[0], LDeltap.shape[0] + LX.shape[0])),
     ]])
     row4 = stacker([[
@@ -127,241 +152,154 @@ def construct_dissipativity_matrix(
 
     return mat
 
-def is_positive_semidefinite(X):
-    if not np.allclose(X, X.T):
-        return False
-    eigvals, _eigvecs = np.linalg.eigh(X)
-    if np.min(eigvals) < 0:
-        return False, f"Minimum eigenvalue {np.min(eigvals)} < 0"
-    return True
-
-def is_positive_definite(X):
-    # Check symmetric.
-    if not np.allclose(X, X.T):
-        return False
-    # Check PD (np.linalg.cholesky does not check for symmetry)
-    try:
-        np.linalg.cholesky(X)
-    except Exception as _e:
-        return False
-    return True
-
 
 class Projector:
-    # Uses the Disciplined Parameterized Programming feature of CVXPY to construct
-    # an optimization problem once, and then resolve it, for (hopefull) a speed up.
 
     def __init__(
         self,
-        # Plant parameters
-        Ap, Bpw, Bpd, Bpu, Cpv, Dpvw, Dpvd, Dpvu,
-        Cpe, Dpew, Dped, Dpeu, Cpy, Dpyw, Dpyd,
-        # Plant uncertainty Delta static IQC multiplier
-        MDeltapvv, MDeltapvw, MDeltapww,
-        # Supply rate
-        Xdd, Xde, Xee,
+        plant_params: PlantParameters,
         # Epsilon to be used in enforcing definiteness of conditions
         eps,
         # Dimensions of variables for controller
         nonlin_size, output_size, state_size, input_size,
         # Parameters for tuning condition number of I - RS,
-        trs, min_trs,
+        trs_mode, # Either "fixed" or "variable"
+        min_trs, # Used as the trs value when trs_mode="fixed"
     ):
-        self.Ap = Ap
-        self.Bpw = Bpw
-        self.Bpd = Bpd
-        self.Bpu = Bpu
-        self.Cpv = Cpv
-        self.Dpvw = Dpvw
-        self.Dpvd = Dpvd
-        self.Dpvu = Dpvu
-        self.Cpe = Cpe
-        self.Dpew = Dpew
-        self.Dped = Dped
-        self.Dpeu = Dpeu
-        self.Cpy = Cpy
-        self.Dpyw = Dpyw
-        self.Dpyd = Dpyd
-        self.MDeltapvv = MDeltapvv
-        self.MDeltapvw = MDeltapvw
-        self.MDeltapww = MDeltapww
-        self.Xdd = Xdd
-        self.Xde = Xde
-        self.Xee = Xee
+        self.plant_params = plant_params
         self.eps = eps
         self.nonlin_size = nonlin_size
         self.output_size = output_size
         self.state_size = state_size
         self.input_size = input_size
+        self.trs_mode = trs_mode
+        self.min_trs = min_trs
 
-        assert np.allclose(self.MDeltapvv, self.MDeltapvv.T)
-        # LDeltap is defined as transpose of Cholesky decomposition matrix of a PSD.
-        Dm, Vm = np.linalg.eigh(self.MDeltapvv)
-        assert np.min(Dm) >= 0 , f"min(Dm): {np.min(Dm)}" # - eps
+        assert is_positive_semidefinite(plant_params.MDeltapvv)
+        Dm, Vm = np.linalg.eigh(plant_params.MDeltapvv)
         self.LDeltap = np.diag(np.sqrt(Dm)) @ Vm.T
 
-        assert np.allclose(self.Xee, self.Xee.T)
-        # LX is defined as the transpose of the Cholesky decomposition matrix of a NSD.
-        Dx, Vx = np.linalg.eigh(-self.Xee)
-        assert np.min(Dx) >= 0  # -eps
+        assert is_positive_semidefinite(-plant_params.Xee)
+        Dx, Vx = np.linalg.eigh(-plant_params.Xee)
         self.LX = np.diag(np.sqrt(Dx)) @ Vx.T
 
-        # Define parameters and variables of LMI
-        # Those with _bar suffix indicate ones that will be used to construct the decision variables.
-        # The _T suffix indicates transpose
+        self._construct_projection_problem()
 
+    def _construct_projection_problem(self):
         # Parameters: This is the thetahat to be projected into the stabilizing set.
-        self.pDkuw = cp.Parameter((self.output_size, self.nonlin_size))
-        self.pS = cp.Parameter((self.state_size, self.state_size), PSD=True)
-        self.pR = cp.Parameter((self.state_size, self.state_size), PSD=True)
-        self.pLambda = cp.Parameter((self.nonlin_size, self.nonlin_size), diag=True)
-        self.pNA11 = cp.Parameter((self.state_size, self.state_size))
-        self.pNA12 = cp.Parameter((self.state_size, self.input_size))
-        self.pNA21 = cp.Parameter((self.output_size, self.state_size))
-        self.pNA22 = cp.Parameter((self.output_size, self.input_size))
-        self.pNB = cp.Parameter((self.state_size, self.nonlin_size))
-        self.pNC = cp.Parameter((self.nonlin_size, self.state_size))
-        self.pDkvyhat = cp.Parameter((self.nonlin_size, self.input_size))
-        self.pDkvwhat = cp.Parameter((self.nonlin_size, self.nonlin_size))
+        self.pThetahat = ControllerThetahatParameters(
+            S = cp.Parameter((self.state_size, self.state_size), PSD=True),
+            R = cp.Parameter((self.state_size, self.state_size), PSD=True),
+            NA11 = cp.Parameter((self.state_size, self.state_size)),
+            NA12 = cp.Parameter((self.state_size, self.input_size)),
+            NA21 = cp.Parameter((self.output_size, self.state_size)),
+            NA22 = cp.Parameter((self.output_size, self.input_size)),
+            NB = cp.Parameter((self.state_size, self.nonlin_size)),
+            NC = cp.Parameter((self.nonlin_size, self.state_size)),
+            Dkuw = cp.Parameter((self.output_size, self.nonlin_size)),
+            Dkvyhat = cp.Parameter((self.nonlin_size, self.input_size)),
+            Dkvwhat = cp.Parameter((self.nonlin_size, self.nonlin_size)),
+            Lambda = cp.Parameter((self.nonlin_size, self.nonlin_size), diag=True),
+        )
 
         # Variables: This will be the solution of the projection.
-        self.vDkuw = cp.Variable((self.output_size, self.nonlin_size))
-        self.vS = cp.Variable((self.state_size, self.state_size), PSD=True)
-        self.vR = cp.Variable((self.state_size, self.state_size), PSD=True)
-        self.vLambda = cp.Variable((self.nonlin_size, self.nonlin_size), diag=True)
-        self.vNA11 = cp.Variable((self.state_size, self.state_size))
-        self.vNA12 = cp.Variable((self.state_size, self.input_size))
-        self.vNA21 = cp.Variable((self.output_size, self.state_size))
-        self.vNA22 = cp.Variable((self.output_size, self.input_size))
-        self.vNB = cp.Variable((self.state_size, self.nonlin_size))
-        self.vNC = cp.Variable((self.nonlin_size, self.state_size))
-        self.vDkvyhat = cp.Variable((self.nonlin_size, self.input_size))
-        self.vDkvwhat = cp.Variable((self.nonlin_size, self.nonlin_size))
+        self.vThetahat = ControllerThetahatParameters(
+            S = cp.Variable((self.state_size, self.state_size), PSD=True),
+            R = cp.Variable((self.state_size, self.state_size), PSD=True),
+            NA11 = cp.Variable((self.state_size, self.state_size)),
+            NA12 = cp.Variable((self.state_size, self.input_size)),
+            NA21 = cp.Variable((self.output_size, self.state_size)),
+            NA22 = cp.Variable((self.output_size, self.input_size)),
+            NB = cp.Variable((self.state_size, self.nonlin_size)),
+            NC = cp.Variable((self.nonlin_size, self.state_size)),
+            Dkuw = cp.Variable((self.output_size, self.nonlin_size)),
+            Dkvyhat = cp.Variable((self.nonlin_size, self.input_size)),
+            Dkvwhat = cp.Variable((self.nonlin_size, self.nonlin_size)),
+            Lambda = cp.Variable((self.nonlin_size, self.nonlin_size), diag=True),
+        )
 
         mat = construct_dissipativity_matrix(
-            Dkuw=self.vDkuw,
-            S=self.vS,
-            R=self.vR,
-            Lambda=self.vLambda,
-            NA11=self.vNA11,
-            NA12=self.vNA12,
-            NA21=self.vNA21,
-            NA22=self.vNA22,
-            NB=self.vNB,
-            NC=self.vNC,
-            Dkvyhat=self.vDkvyhat,
-            Dkvwhat=self.vDkvwhat,
-            Ap=self.Ap,
-            Bpw=self.Bpw,
-            Bpd=self.Bpd,
-            Bpu=self.Bpu,
-            Cpv=self.Cpv,
-            Dpvw=self.Dpvw,
-            Dpvd=self.Dpvd,
-            Dpvu=self.Dpvu,
-            Cpe=self.Cpe,
-            Dpew=self.Dpew,
-            Dped=self.Dped,
-            Dpeu=self.Dpeu,
-            Cpy=self.Cpy,
-            Dpyw=self.Dpyw,
-            Dpyd=self.Dpyd,
+            plant_params=self.plant_params,
             LDeltap=self.LDeltap,
-            MDeltapvw=self.MDeltapvw,
-            MDeltapww=self.MDeltapww,
-            Xdd=self.Xdd,
-            Xde=self.Xde,
             LX=self.LX,
+            controller_params=self.vThetahat,
             stacker="cvxpy",
         )
 
         # Used for conditioning I - RS
-        self.min_tRS = min_trs
-        if trs is None:
-            self.tRS = cp.Variable(nonneg=True)
-            cost_ill_conditioning = -self.tRS
-        else:
-            self.tRS = trs
+        if self.trs_mode == "variable":
+            self.vtrs = cp.Variable(nonneg=True)
+            cost_ill_conditioning = -self.vtrs
+        elif self.trs_mode == "fixed":
+            self.vtrs = self.min_trs
             cost_ill_conditioning = 0
-        
-        # self.tR = cp.Variable(nonneg=True)
-        # self.tS = cp.Variable(nonneg=True)
+        else:
+            raise ValueError(f"Unexpected trs_mode value of {self.trs_mode}.")
 
         constraints = [
-            self.vS >> self.eps * np.eye(self.vS.shape[0]),
-            self.vR >> self.eps * np.eye(self.vR.shape[0]),
-            # (1-self.tS) * np.eye(self.vS.shape[0]) >> self.vS,
-            # (1-self.tR) * np.eye(self.vR.shape[0]) >> self.vR,
-            self.tRS >= self.min_tRS + self.eps,
-            self.vLambda >> self.eps * np.eye(self.vLambda.shape[0]),
-            cp.bmat(
-                [
-                    [self.vR, self.tRS * np.eye(self.vR.shape[0])],
-                    [self.tRS * np.eye(self.vS.shape[0]), self.vS],
-                ]
-            )
-            >> self.eps * np.eye(self.vR.shape[0] + self.vS.shape[0]),
-            mat << 0, # -self.eps * np.eye(mat.shape[0]),
+            self.vtrs >= self.min_trs,
+            self.vThetahat.S >> self.eps * np.eye(self.vThetahat.S.shape[0]),
+            self.vThetahat.R >> self.eps * np.eye(self.vThetahat.R.shape[0]),
+            self.vThetahat.Lambda >> self.eps * np.eye(self.vThetahat.Lambda.shape[0]),
+            cp.bmat([
+                [self.vThetahat.R, self.vtrs * np.eye(self.vThetahat.R.shape[0])],
+                [self.vtrs * np.eye(self.vThetahat.S.shape[0]), self.vThetahat.S],
+            ]) >> self.eps * np.eye(self.vThetahat.R.shape[0] + self.vThetahat.S.shape[0]),
+            mat << 0,
         ]
 
         cost_projection_error = sum([
-                cp.sum_squares(self.pDkuw - self.vDkuw),
-                cp.sum_squares(self.pS - self.vS),
-                cp.sum_squares(self.pR - self.vR),
-                cp.sum_squares(self.pLambda - self.vLambda),
-                cp.sum_squares(self.pNA11 - self.vNA11),
-                cp.sum_squares(self.pNA12 - self.vNA12),
-                cp.sum_squares(self.pNA21 - self.vNA21),
-                cp.sum_squares(self.pNA22 - self.vNA22),
-                cp.sum_squares(self.pNB - self.vNB),
-                cp.sum_squares(self.pNC - self.vNC),
-                cp.sum_squares(self.pDkvyhat - self.vDkvyhat),
-                cp.sum_squares(self.pDkvwhat - self.vDkvwhat),
+                cp.sum_squares(self.pThetahat.Dkuw - self.vThetahat.Dkuw),
+                cp.sum_squares(self.pThetahat.S - self.vThetahat.S),
+                cp.sum_squares(self.pThetahat.R - self.vThetahat.R),
+                cp.sum_squares(self.pThetahat.Lambda - self.vThetahat.Lambda),
+                cp.sum_squares(self.pThetahat.NA11 - self.vThetahat.NA11),
+                cp.sum_squares(self.pThetahat.NA12 - self.vThetahat.NA12),
+                cp.sum_squares(self.pThetahat.NA21 - self.vThetahat.NA21),
+                cp.sum_squares(self.pThetahat.NA22 - self.vThetahat.NA22),
+                cp.sum_squares(self.pThetahat.NB - self.vThetahat.NB),
+                cp.sum_squares(self.pThetahat.NC - self.vThetahat.NC),
+                cp.sum_squares(self.pThetahat.Dkvyhat - self.vThetahat.Dkvyhat),
+                cp.sum_squares(self.pThetahat.Dkvwhat - self.vThetahat.Dkvwhat),
         ])
         cost_size = sum([
-                cp.sum_squares(self.vDkuw),
-                cp.sum_squares(self.vS),
-                cp.sum_squares(self.vR),
-                cp.sum_squares(self.vLambda),
-                cp.sum_squares(self.vNA11),
-                cp.sum_squares(self.vNA12),
-                cp.sum_squares(self.vNA21),
-                cp.sum_squares(self.vNA22),
-                cp.sum_squares(self.vNB),
-                cp.sum_squares(self.vNC),
-                cp.sum_squares(self.vDkvyhat),
-                cp.sum_squares(self.vDkvwhat),
+                cp.sum_squares(self.vThetahat.Dkuw),
+                cp.sum_squares(self.vThetahat.S),
+                cp.sum_squares(self.vThetahat.R),
+                cp.sum_squares(self.vThetahat.Lambda),
+                cp.sum_squares(self.vThetahat.NA11),
+                cp.sum_squares(self.vThetahat.NA12),
+                cp.sum_squares(self.vThetahat.NA21),
+                cp.sum_squares(self.vThetahat.NA22),
+                cp.sum_squares(self.vThetahat.NB),
+                cp.sum_squares(self.vThetahat.NC),
+                cp.sum_squares(self.vThetahat.Dkvyhat),
+                cp.sum_squares(self.vThetahat.Dkvwhat),
         ])
-        
-        # objective = cost_projection_error + cost_ill_conditioning + cost_size
         objective = cost_projection_error + cost_ill_conditioning + cost_size
-        # objective = 0 # cost_ill_conditioning
 
         self.problem = cp.Problem(cp.Minimize(objective), constraints)
 
-    def project(
-        self, Dkuw, S, R, Lambda, NA11, NA12, NA21, NA22,
-        NB, NC, Dkvyhat, Dkvwhat, solver=cp.MOSEK, **kwargs,
-    ):
+    def project(self, controller_params: ControllerThetahatParameters, solver=cp.MOSEK, **kwargs):
         """Projects input variables to set corresponding to dissipative controllers."""
-        self.pDkuw.value = Dkuw
-        self.pS.value = S
-        self.pR.value = R
-        self.pLambda.value = Lambda
-        self.pNA11.value = NA11
-        self.pNA12.value = NA12
-        self.pNA21.value = NA21
-        self.pNA22.value = NA22
-        self.pNB.value = NB
-        self.pNC.value = NC
-        self.pDkvyhat.value = Dkvyhat
-        self.pDkvwhat.value = Dkvwhat
+        K = controller_params
+        self.pThetahat.Dkuw.value = K.Dkuw
+        self.pThetahat.S.value = K.S
+        self.pThetahat.R.value = K.R
+        self.pThetahat.Lambda.value = K.Lambda
+        self.pThetahat.NA11.value = K.NA11
+        self.pThetahat.NA12.value = K.NA12
+        self.pThetahat.NA21.value = K.NA21
+        self.pThetahat.NA22.value = K.NA22
+        self.pThetahat.NB.value = K.NB
+        self.pThetahat.NC.value = K.NC
+        self.pThetahat.Dkvyhat.value = K.Dkvyhat
+        self.pThetahat.Dkvwhat.value = K.Dkvwhat
 
         try:
             t0 = time.perf_counter()
             # TODO(Neelay) test various solvers
-            # self.problem.solve(enforce_dpp=True, solver=solver, **kwargs)
-            self.problem.solve(solver=solver, **kwargs)
+            self.problem.solve(enforce_dpp=True, solver=solver, **kwargs)
             t1 = time.perf_counter()
             # print(f"Projection solving took {t1-t0} seconds.")
         except Exception as e:
@@ -379,215 +317,46 @@ class Projector:
             raise Exception()
         print(f"Projection objective: {self.problem.value}")
 
-        oDkuw = self.vDkuw.value
-        oS = self.vS.value
-        oR = self.vR.value
-        # Since diag=True makes it vLambda.value sparse
-        oLambda = self.vLambda.value.toarray()
-        oNA11 = self.vNA11.value
-        oNA12 = self.vNA12.value
-        oNA21 = self.vNA21.value
-        oNA22 = self.vNA22.value
-        oNB = self.vNB.value
-        oNC = self.vNC.value
-        oDkvyhat = self.vDkvyhat.value
-        oDkvwhat = self.vDkvwhat.value
-
-        # print(f"tRS: {self.tRS.value}")
-
-        assert not np.any(np.isnan(oDkuw))
-        assert not np.any(np.isnan(oS))
-        assert not np.any(np.isnan(oR))
-        assert not np.any(np.isnan(oLambda))
-        assert not np.any(np.isnan(oNA11))
-        assert not np.any(np.isnan(oNA12))
-        assert not np.any(np.isnan(oNA21))
-        assert not np.any(np.isnan(oNA22))
-        assert not np.any(np.isnan(oNB))
-        assert not np.any(np.isnan(oNC))
-        assert not np.any(np.isnan(oDkvyhat))
-        assert not np.any(np.isnan(oDkvwhat))
-
-        return (
-            oDkuw,
-            oS,
-            oR,
-            oLambda,
-            oNA11,
-            oNA12,
-            oNA21,
-            oNA22,
-            oNB,
-            oNC,
-            oDkvyhat,
-            oDkvwhat,
+        new_controller_params = ControllerThetahatParameters(
+            self.vThetahat.S.value, self.vThetahat.R.value, self.vThetahat.NA11.value,
+            self.vThetahat.NA12.value, self.vThetahat.NA21.value, self.vThetahat.NA22.value,
+            self.vThetahat.NB.value, self.vThetahat.NC.value, self.vThetahat.Dkuw.value,
+            self.vThetahat.Dkvyhat.value, self.vThetahat.Dkvwhat.value, self.vThetahat.Lambda.value.toarray()
         )
+        return new_controller_params
 
-    def is_dissipative(
-        self,
-        Dkuw,
-        S,
-        R,
-        Lambda,
-        NA11,
-        NA12,
-        NA21,
-        NA22,
-        NB,
-        NC,
-        Dkvyhat,
-        Dkvwhat,
-    ):
+    def is_dissipative(self, controller_params: ControllerThetahatParameters):
         """Check whether given variables already satisfy dissipativity condition."""
         # All inputs must be numpy 2d arrays.
 
         # Check S, R, and Lambda are positive definite
-        if not is_positive_definite(S):
+        if not is_positive_definite(controller_params.S):
             print("S is not PD.")
             return False
-        if not is_positive_definite(R):
+        if not is_positive_definite(controller_params.R):
             print("R is not PD.")
             return False
-        if not is_positive_definite(Lambda):
+        if not is_positive_definite(controller_params.Lambda):
             print("Lambda is not PD.")
             return False
 
         # Check [R, I; I, S] is positive definite.
-        mat = np.asarray(np.bmat([[R, np.eye(R.shape[0])], [np.eye(R.shape[0]), S]]))
+        mat = np.asarray(np.bmat([
+            [controller_params.R, np.eye(controller_params.R.shape[0])],
+            [np.eye(controller_params.R.shape[0]), controller_params.S]
+        ]))
         if not is_positive_definite(mat):
             print("[R, I; I, S] is not PD.")
             return False
 
         # Check main dissipativity condition.
         mat = construct_dissipativity_matrix(
-            Dkuw=Dkuw,
-            S=S,
-            R=R,
-            Lambda=Lambda,
-            NA11=NA11,
-            NA12=NA12,
-            NA21=NA21,
-            NA22=NA22,
-            NB=NB,
-            NC=NC,
-            Dkvyhat=Dkvyhat,
-            Dkvwhat=Dkvwhat,
-            Ap=self.Ap,
-            Bpw=self.Bpw,
-            Bpd=self.Bpd,
-            Bpu=self.Bpu,
-            Cpv=self.Cpv,
-            Dpvw=self.Dpvw,
-            Dpvd=self.Dpvd,
-            Dpvu=self.Dpvu,
-            Cpe=self.Cpe,
-            Dpew=self.Dpew,
-            Dped=self.Dped,
-            Dpeu=self.Dpeu,
-            Cpy=self.Cpy,
-            Dpyw=self.Dpyw,
-            Dpyd=self.Dpyd,
+            plant_params=self.plant_params,
             LDeltap=self.LDeltap,
-            MDeltapvw=self.MDeltapvw,
-            MDeltapww=self.MDeltapww,
-            Xdd=self.Xdd,
-            Xde=self.Xde,
             LX=self.LX,
+            controller_params=controller_params,
             stacker="numpy",
         )
         # Check condition mat <= 0
         return is_positive_semidefinite(-mat)
     
-    def verify_dissipativity(self, Ak, Bkw, Bky, Ckv, Dkvw, Dkvy, Cku, Dkuw, Dkuy):
-
-        # Form closed-loop
-        A = np.bmat([
-            [self.Ap + self.Bpu @ Dkuy @ self.Cpy, self.Bpu @ Cku],
-            [Bky @ self.Cpy, Ak]
-        ])
-        Bw = np.bmat([
-            [self.Bpw + self.Bpu @ Dkuy @ self.Dpyw, self.Bpu @ Dkuw],
-            [Bky @ self.Dpyw, Bkw]
-        ])
-        Bd = np.bmat([
-            [self.Bpd + self.Bpu @ Dkuy @ self.Dpyd],
-            [Bky @ self.Dpyd]
-        ])
-        Cv = np.bmat([
-            [self.Cpv + self.Dpvu @ Dkuy @ self.Cpy, self.Dpvu @ Cku],
-            [Dkvy @ self.Cpy, Ckv]
-        ])
-        Dvw = np.bmat([
-            [self.Dpvw + self.Dpvu @ Dkuy @ self.Dpyw, self.Dpvu @ Dkuw],
-            [Dkvy @ self.Dpyw, Dkvw]
-        ])
-        Dvd = np.bmat([
-            [self.Dpvd + self.Dpvu @ Dkuy @ self.Dpyd],
-            [Dkvy @ self.Dpyd]
-        ])
-        Ce = np.bmat([
-            [self.Cpe + self.Dpeu @ Dkuy @ self.Cpy, self.Dpeu @ Cku]
-        ])
-        Dew = np.bmat([
-            [self.Dpew + self.Dpeu @ Dkuy @ self.Dpyw, self.Dpeu @ Dkuw]
-        ])
-        Ded = np.bmat([
-            [self.Dped + self.Dpeu @ Dkuy @ self.Dpyd]
-        ])
-
-        P = cp.Variable((2*self.state_size, 2*self.state_size), PSD=True)
-        Lambda = cp.Variable((self.nonlin_size, self.nonlin_size), diag=True)
-
-        F1 = cp.bmat([
-            [A.T @ P + P @ A, P @ Bw, P @ Bd],
-            [Bw.T @ P, np.zeros((Bw.shape[1], Bw.shape[1] + Bd.shape[1]))],
-            [Bd.T @ P, np.zeros((Bd.shape[1], Bw.shape[1] + Bd.shape[1]))]
-        ])
-        
-        Mright = np.bmat([
-            [Cv, Dvw, Dvd],
-            [np.zeros((Dvw.shape[1], Cv.shape[1])), np.eye(Dvw.shape[1]), np.zeros((Dvw.shape[1], Dvd.shape[1]))]
-        ])
-        M = cp.bmat([
-            [self.MDeltapvv, np.zeros((self.MDeltapvv.shape[0], Lambda.shape[1])), self.MDeltapvw, np.zeros((self.MDeltapvv.shape[0], Lambda.shape[1]))],
-            [np.zeros((Lambda.shape[0], self.MDeltapvv.shape[1] + Lambda.shape[1] + self.MDeltapvw.shape[1])), Lambda],
-            [self.MDeltapvw.T, np.zeros((self.MDeltapww.shape[0], Lambda.shape[1])), self.MDeltapww, np.zeros((self.MDeltapww.shape[0], Lambda.shape[1]))],
-            [np.zeros((Lambda.shape[0], self.MDeltapvv.shape[1])), Lambda, np.zeros((Lambda.shape[0], self.MDeltapww.shape[1])), -2*Lambda]
-        ])
-
-        Xright = np.bmat([
-            [np.zeros((Ded.shape[1], Ce.shape[1] + Dew.shape[1])), np.eye(Ded.shape[1])],
-            [Ce, Dew, Ded]
-        ])
-        X = np.bmat([
-            [self.Xdd, self.Xde],
-            [self.Xde.T, self.Xee]
-        ])
-
-        mat = F1 + Mright.T @ M @ Mright - Xright.T @ X @ Xright
-
-        constraints = [
-            P >> self.eps * np.eye(P.shape[0]),
-            Lambda >> self.eps * np.eye(Lambda.shape[0]),
-            mat << 0, # -self.eps * np.eye(mat.shape[0])
-        ]
-
-        problem = cp.Problem(cp.Minimize(cp.sum_squares(P) + cp.sum_squares(Lambda)), constraints)
-
-        try:
-            problem.solve(solver=cp.MOSEK) 
-        except Exception as e:
-            print(f"Verification: Failed to solve with exception: {e}")
-            return False
-
-        feas_stats = [
-            cp.OPTIMAL,
-            cp.UNBOUNDED,
-            cp.OPTIMAL_INACCURATE,
-            cp.UNBOUNDED_INACCURATE,
-        ]
-        if self.problem.status not in feas_stats:
-            print(f"Verification: Failed with status {self.problem.status}")
-            return False
-        
-        return True

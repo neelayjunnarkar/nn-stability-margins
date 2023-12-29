@@ -105,3 +105,110 @@ class ControllerThetaParameters:
         return ControllerThetaParameters(
             Ak, Bkw, Bky, Ckv, Dkvw, Dkvy, Cku, Dkuw, Dkuy, Lambda
         )
+
+@dataclass
+class ControllerThetahatParameters:
+    S: Any
+    R: Any
+    NA11: Any
+    NA12: Any
+    NA21: Any
+    NA22: Any
+    NB: Any
+    NC: Any
+    Dkuw: Any
+    Dkvyhat: Any
+    Dkvwhat: Any
+    Lambda: Any
+
+    def torch_to_np(self):
+        S = to_numpy(self.S)
+        R = to_numpy(self.R)
+        NA11 = to_numpy(self.NA11)
+        NA12 = to_numpy(self.NA12)
+        NA21 = to_numpy(self.NA21)
+        NA22 = to_numpy(self.NA22)
+        NB = to_numpy(self.NB)
+        NC = to_numpy(self.NC)
+        Dkuw = to_numpy(self.Dkuw)
+        Dkvyhat = to_numpy(self.Dkvyhat)
+        Dkvwhat = to_numpy(self.Dkvwhat)
+        Lambda = to_numpy(self.Lambda)
+        return ControllerThetahatParameters(
+            S, R, NA11, NA12, NA21, NA22, NB, NC, Dkuw, Dkvyhat, Dkvwhat, Lambda
+        )
+    
+    def np_to_torch(self, device):
+        S = from_numpy(self.S, device=device)
+        R = from_numpy(self.R, device=device)
+        NA11 = from_numpy(self.NA11, device=device)
+        NA12 = from_numpy(self.NA12, device=device)
+        NA21 = from_numpy(self.NA21, device=device)
+        NA22 = from_numpy(self.NA22, device=device)
+        NB = from_numpy(self.NB, device=device)
+        NC = from_numpy(self.NC, device=device)
+        Dkuw = from_numpy(self.Dkuw, device=device)
+        Dkvyhat = from_numpy(self.Dkvyhat, device=device)
+        Dkvwhat = from_numpy(self.Dkvwhat, device=device)
+        Lambda = from_numpy(self.Lambda, device=device)
+        return ControllerThetahatParameters(
+            S, R, NA11, NA12, NA21, NA22, NB, NC, Dkuw, Dkvyhat, Dkvwhat, Lambda
+        )
+
+
+@dataclass
+class ControllerLTIThetaParameters:
+    Ak: Any  # NDArrayF32
+    Bky: Any  # NDArrayF32
+    Cku: Any  # NDArrayF32
+    Dkuy: Any  # NDArrayF32
+
+    def torch_to_np(self):
+        Ak = to_numpy(self.Ak)
+        Bky = to_numpy(self.Bky)
+        Cku = to_numpy(self.Cku)
+        Dkuy = to_numpy(self.Dkuy)
+        return ControllerLTIThetaParameters(
+            Ak, Bky, Cku, Dkuy
+        )
+    
+    def np_to_torch(self, device):
+        Ak = from_numpy(self.Ak, device=device)
+        Bky = from_numpy(self.Bky, device=device)
+        Cku = from_numpy(self.Cku, device=device)
+        Dkuy = from_numpy(self.Dkuy, device=device)
+        return ControllerLTIThetaParameters(
+            Ak, Bky, Cku, Dkuy
+        )
+
+
+class ControllerLTIThetahatParameters:
+    S: Any
+    R: Any
+    NA11: Any
+    NA12: Any
+    NA21: Any
+    NA22: Any
+
+    def torch_to_np(self):
+        S = to_numpy(self.S)
+        R = to_numpy(self.R)
+        NA11 = to_numpy(self.NA11)
+        NA12 = to_numpy(self.NA12)
+        NA21 = to_numpy(self.NA21)
+        NA22 = to_numpy(self.NA22)
+        return ControllerLTIThetahatParameters(
+            S, R, NA11, NA12, NA21, NA22
+        )
+    
+    def np_to_torch(self, device):
+        S = from_numpy(self.S, device=device)
+        R = from_numpy(self.R, device=device)
+        NA11 = from_numpy(self.NA11, device=device)
+        NA12 = from_numpy(self.NA12, device=device)
+        NA21 = from_numpy(self.NA21, device=device)
+        NA22 = from_numpy(self.NA22, device=device)
+        return ControllerLTIThetahatParameters(
+            S, R, NA11, NA12, NA21, NA22
+        )
+

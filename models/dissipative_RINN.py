@@ -10,6 +10,7 @@ from torchdeq.norm import apply_norm, reset_norm
 from activations import activations_map
 from thetahat_dissipativity import Projector
 from utils import build_mlp, from_numpy, to_numpy, uniform
+from variable_structs import ControllerThetahatParameters
 
 def print_norms(X, name):
      print("{}: largest gain: {:0.3f}, 1: {:0.3f}, 2: {:0.3f}, inf: {:0.3f}, fro: {:0.3f}".format(
@@ -128,59 +129,43 @@ class DissipativeRINN(RecurrentNetwork, nn.Module):
         assert "plant" in model_config
         assert "plant_config" in model_config
         plant = model_config["plant"](model_config["plant_config"])
+        np_plant_params = plant.get_params()
+        self.plant_params = np_plant_params.np_to_torch(device=self.Duw_T.device)
+        assert self.state_size == self.plant_params.Ap.shape[0]
 
-        plant_params = plant.get_params()
-
-        self.Ap = from_numpy(plant_params["Ap"], device=self.Duw_T.device)
-        self.Bpw = from_numpy(plant_params["Bpw"], device=self.Duw_T.device)
-        self.Bpd = from_numpy(plant_params["Bpd"], device=self.Duw_T.device)
-        self.Bpu = from_numpy(plant_params["Bpu"], device=self.Duw_T.device)
-        self.Cpv = from_numpy(plant_params["Cpv"], device=self.Duw_T.device)
-        self.Dpvw = from_numpy(plant_params["Dpvw"], device=self.Duw_T.device)
-        self.Dpvd = from_numpy(plant_params["Dpvd"], device=self.Duw_T.device)
-        self.Dpvu = from_numpy(plant_params["Dpvu"], device=self.Duw_T.device)
-        self.Cpe = from_numpy(plant_params["Cpe"], device=self.Duw_T.device)
-        self.Dpew = from_numpy(plant_params["Dpew"], device=self.Duw_T.device)
-        self.Dped = from_numpy(plant_params["Dped"], device=self.Duw_T.device)
-        self.Dpeu = from_numpy(plant_params["Dpeu"], device=self.Duw_T.device)
-        self.Cpy = from_numpy(plant_params["Cpy"], device=self.Duw_T.device)
-        self.Dpyw = from_numpy(plant_params["Dpyw"], device=self.Duw_T.device)
-        self.Dpyd = from_numpy(plant_params["Dpyd"], device=self.Duw_T.device)
-
-        assert self.state_size == self.Ap.shape[0]
-
-        trs = model_config["trs"] if "trs" in model_config else None
+        trs_mode = model_config["trs_mode"] if "trs_mode" in model_config else "variable"
         min_trs = model_config["min_trs"] if "min_trs" in model_config else 1.0
 
         self.projector = Projector(
-            **plant_params,
+            np_plant_params,
             eps=self.eps,
             nonlin_size=self.nonlin_size,
             output_size=self.output_size,
             state_size=self.state_size,
             input_size=self.input_size,
-            trs=trs,
+            trs_mode=trs_mode,
             min_trs=min_trs,
         )
 
         self.oldtheta = None
+
+        self.projected = False # Set to true within first call to construct_thetahat
         self.project()
 
     def project(self):
-        """Modify parameters to ensure existence and uniqueness of solution to implicit equation."""
+        """Modify parameters to ensure satisfaction of dissipativity condition."""
         self.construct_thetahat()
-        with torch.no_grad(): 
-            change_made = self.enforce_dissipativity()
-        if change_made:
-            self.construct_thetahat()
+        with torch.no_grad():
+            controller_params = ControllerThetahatParameters(
+                self.S, self.R, self.NA11, self.NA12, self.NA21, self.NA22,
+                self.NB, self.NC, self.Duw_T.t(), self.Dvyhat, self.Dvwhat, self.Lambda
+            )
+            is_dissipative = self.projector.is_dissipative(controller_params.torch_to_np())
+            print(f"Is dissipative: {is_dissipative}")
+            if not is_dissipative:
+                self.enforce_dissipativity()
+                self.construct_thetahat()
         self.construct_theta()
-
-        is_dissipative = self.projector.verify_dissipativity(
-            to_numpy(self.A_T.t()), to_numpy(self.Bw_T.t()), to_numpy(self.By_T.t()), 
-            to_numpy(self.Cv_T.t()), to_numpy(self.Dvw_T.t()), to_numpy(self.Dvy_T.t()), 
-            to_numpy(self.Cu_T.t()), to_numpy(self.Duw_T.t()), to_numpy(self.Duy_T.t())
-        )
-        print(f"Verification: {is_dissipative}")
 
         theta = torch.vstack((
             torch.hstack((self.A_T.t(),  self.Bw_T.t(), self.By_T.t())),
@@ -206,91 +191,68 @@ class DissipativeRINN(RecurrentNetwork, nn.Module):
 
     def construct_thetahat(self):
         """From the _bar parameters, construct the decision variables."""
+        if self.projected:
+            eps = 0.0
+        else:
+            eps = self.eps
+
         assert self.S_bar.ndim == 2
         assert self.S_bar.shape[0] == self.state_size and self.S_bar.shape[1] == self.state_size
         # TODO(Neelay) remove the addition of epsilon, except on first instantiations of S, R, Lambda
-        self.S = torch.mm(self.S_bar.t(), self.S_bar) + self.eps * torch.eye(
+        self.S = torch.mm(self.S_bar.t(), self.S_bar) + eps * torch.eye(
             self.state_size, device=self.S_bar.device
         )
 
         assert self.R_bar.ndim == 2
         assert self.R_bar.shape[0] == self.state_size and self.R_bar.shape[1] == self.state_size
-        self.R = torch.mm(self.R_bar.t(), self.R_bar) + self.eps * torch.eye(
+        self.R = torch.mm(self.R_bar.t(), self.R_bar) + eps * torch.eye(
             self.state_size, device=self.R_bar.device
         )
 
         assert self.Lambda_bar.ndim == 1
         assert self.Lambda_bar.shape[0] == self.nonlin_size
-        self.Lambda = self.Lambda_bar.square() + self.eps * torch.ones(
+        self.Lambda = self.Lambda_bar.square() + eps * torch.ones(
             self.nonlin_size, device=self.Lambda_bar.device
         )
         self.Lambda = self.Lambda.diag()
 
+        self.projected = True
+
     def enforce_dissipativity(self):
-        """Checks if current thetahat parameters correspond to a controller
-        which makes the closed loop dissipative. If yes, no change is made.
-        If no, the module (_bar, etc.) parameters are modified such that they do.
-
-        Returns whether the module parameters have been modified."""
-
-        Dkuw = to_numpy(self.Duw_T.t())
-        S = to_numpy(self.S)
-        R = to_numpy(self.R)
-        Lambda = to_numpy(self.Lambda)
-        NA11 = to_numpy(self.NA11)
-        NA12 = to_numpy(self.NA12)
-        NA21 = to_numpy(self.NA21)
-        NA22 = to_numpy(self.NA22)
-        NB = to_numpy(self.NB)
-        NC = to_numpy(self.NC)
-        Dkvyhat = to_numpy(self.Dvyhat)
-        Dkvwhat = to_numpy(self.Dvwhat)
-
+        """Projects current thetahat parameters to ones that are dissipative."""
         # TODO(Neelay) Consider two levels of epsilon, one for checking dissipativity,
         # and one for enforcing dissipativity, to reduce chatter?
-        # print("Checking if still dissipative after gradient step.")
-        is_dissipative = self.projector.is_dissipative(
-            Dkuw=Dkuw, S=S, R=R, Lambda=Lambda,
-            NA11=NA11, NA12=NA12, NA21=NA21, NA22=NA22,
-            NB=NB, NC=NC, Dkvyhat=Dkvyhat, Dkvwhat=Dkvwhat,
-        )
 
-        if is_dissipative:
-            print("Still dissipative after gradient step.")
-            return False
-        print("No longer dissipative after gradient step.")
-
-        (
-            oDkuw, oS, oR, oLambda,
-            oNA11, oNA12, oNA21, oNA22,
-            oNB, oNC, oDkvyhat, oDkvwhat,
-        ) = self.projector.project(
-            Dkuw=Dkuw, S=S, R=R, Lambda=Lambda, 
-            NA11=NA11, NA12=NA12, NA21=NA21, NA22=NA22, 
-            NB=NB, NC=NC, Dkvyhat=Dkvyhat, Dkvwhat=Dkvwhat,
+        controller_params = ControllerThetahatParameters(
+            self.S, self.R, self.NA11, self.NA12, self.NA21, self.NA22,
+            self.NB, self.NC, self.Duw_T.t(), self.Dvyhat, self.Dvwhat, self.Lambda
         )
+        np_controller_params = controller_params.torch_to_np()
+
+        np_new_controller_params = self.projector.project(np_controller_params)
+        new_k = np_new_controller_params.np_to_torch(self.Duw_T.device)
 
         # TODO(Neelay) Maybe don't need to initialize _bar variables, and
         # can skip directly to thetahat?
 
-        S_bar = np.linalg.cholesky(oS).T
-        R_bar = np.linalg.cholesky(oR).T
-        Lambda_bar = np.sqrt(np.diag(oLambda))
+        S_bar = np.linalg.cholesky(np_new_controller_params.S).T
+        R_bar = np.linalg.cholesky(np_new_controller_params.R).T
+        Lambda_bar = np.sqrt(np.diag(np_new_controller_params.Lambda))
 
         missing, unexpected = self.load_state_dict(
             {
-                "Duw_T": from_numpy(oDkuw.T, device=self.Duw_T.device),
+                "Duw_T": new_k.Dkuw.t(),
                 "S_bar": from_numpy(S_bar, device=self.S_bar.device),
                 "R_bar": from_numpy(R_bar, device=self.R_bar.device),
                 "Lambda_bar": from_numpy(Lambda_bar, device=self.Lambda_bar.device),
-                "NA11": from_numpy(oNA11, device=self.NA11.device),
-                "NA12": from_numpy(oNA12, device=self.NA12.device),
-                "NA21": from_numpy(oNA21, device=self.NA21.device),
-                "NA22": from_numpy(oNA22, device=self.NA22.device),
-                "NB": from_numpy(oNB, device=self.NB.device),
-                "NC": from_numpy(oNC, device=self.NC.device),
-                "Dvyhat": from_numpy(oDkvyhat, device=self.Dvyhat.device),
-                "Dvwhat": from_numpy(oDkvwhat, device=self.Dvwhat.device),
+                "NA11": new_k.NA11,
+                "NA12": new_k.NA12,
+                "NA21": new_k.NA21,
+                "NA22": new_k.NA22,
+                "NB": new_k.NB,
+                "NC": new_k.NC,
+                "Dvyhat": new_k.Dkvyhat,
+                "Dvwhat": new_k.Dkvwhat,
             },
             strict=False,
         )
@@ -309,8 +271,6 @@ class DissipativeRINN(RecurrentNetwork, nn.Module):
             "value.4.weight_g",
             "value.4.weight_v",
         ], missing
-
-        return True
 
     def construct_theta(self):
         """Construct theta, the parameters of the controller, from thetahat,
@@ -373,26 +333,30 @@ class DissipativeRINN(RecurrentNetwork, nn.Module):
         # Cu = NA3[self.state_size :, : self.state_size]
         # Duy = NA3[self.state_size :, self.state_size :]
 
+        Ap = self.plant_params.Ap
+        Bpu = self.plant_params.Bpu
+        Cpy = self.plant_params.Cpy
+
         Duy = self.NA22
-        By = torch.linalg.solve(U, self.NA12 - self.S @ self.Bpu @ Duy)
-        Cu = torch.linalg.solve(V, self.NA21.t() - self.R @ self.Cpy.t() @ Duy.t()).t()
+        By = torch.linalg.solve(U, self.NA12 - self.S @Bpu @ Duy)
+        Cu = torch.linalg.solve(V, self.NA21.t() - self.R @ Cpy.t() @ Duy.t()).t()
         AVT = torch.linalg.solve(
             U,
             self.NA11 \
-                - U @ By @ self.Cpy @ self.R \
-                - self.S @ self.Bpu @ (Cu @ V.t() + Duy @ self.Cpy @ self.R) \
-                - self.S @ self.Ap @ self.R
+                - U @ By @ Cpy @ self.R \
+                - self.S @ Bpu @ (Cu @ V.t() + Duy @ Cpy @ self.R) \
+                - self.S @ Ap @ self.R
         )
         A = torch.linalg.solve(V, AVT.t()).t()
 
         # Solve for Bw from NB
         # NB = NB1 + U Bw
-        NB1 = torch.mm(self.S, torch.mm(self.Bpu, self.Duw_T.t()))
+        NB1 = torch.mm(self.S, torch.mm(Bpu, self.Duw_T.t()))
         Bw = torch.linalg.solve(U, self.NB - NB1)
 
         # Solve for Cv from NC
         # NC = NC1 + Lambda Cv V^T
-        NC1 = torch.mm(self.Dvyhat, torch.mm(self.Cpy, self.R))
+        NC1 = torch.mm(self.Dvyhat, torch.mm(Cpy, self.R))
         CvVT = torch.linalg.solve(self.Lambda, self.NC - NC1)
         Cv = torch.linalg.solve(V, CvVT.t()).t()
         # Bring together the theta parameters here

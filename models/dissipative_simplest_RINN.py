@@ -151,14 +151,14 @@ class DissipativeSimplestRINN(RecurrentNetwork, nn.Module):
             self.Lambda = from_numpy(model_config["Lambda"], device=self.A_T.device)
         else:
             self.Lambda = torch.eye(self.nonlin_size)
-        self.oldtheta = None
-
         
+        self.oldtheta = None
+    
         self.project()
 
 
     def project(self):
-        """Modify parameters to ensure existence and uniqueness of solution to implicit equation."""
+        """Modify parameters to ensure satisfaction of dissipativity condition."""
         with torch.no_grad():
             if self.mode == "simplest":
                 print("Mode: simplest")

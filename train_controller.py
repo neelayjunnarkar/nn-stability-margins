@@ -4,6 +4,7 @@ Main file for configuring and training controllers.
 
 import math
 import os
+import multiprocessing
 
 import numpy as np
 import ray
@@ -32,7 +33,7 @@ from models import (
 from trainers import ProjectedPPOTrainer
 
 # N_CPUS = 1  # test
-N_CPUS = 8  # laptop
+N_CPUS = multiprocessing.cpu_count()
 # N_CPUS  = int(os.getenv('SLURM_CPUS_ON_NODE'))
 n_tasks = 1
 n_workers_per_task = int(math.floor(N_CPUS / n_tasks)) - 1 - 1
@@ -96,18 +97,18 @@ config = {
         #     "dt": dt,
         #     "log_std_init": np.log(1.0)
         # }
-        # "custom_model": DissipativeRINN,
-        # "custom_model_config": {
-        #     "state_size": 2,
-        #     "nonlin_size": 16,
-        #     "log_std_init": np.log(1.0),
-        #     "dt": dt,
-        #     "plant": env,
-        #     "plant_config": env_config,
-        #     "eps": 1e-3,
-        #     "trs": 1.44,
-        #     "min_trs": 1.0,
-        # }
+        "custom_model": DissipativeRINN,
+        "custom_model_config": {
+            "state_size": 2,
+            "nonlin_size": 16,
+            "log_std_init": np.log(1.0),
+            "dt": dt,
+            "plant": env,
+            "plant_config": env_config,
+            "eps": 1e-3,
+            "trs_mode": "fixed",
+            "min_trs": 1.44,
+        }
         # "custom_model": DissipativeThetaRINN,
         # "custom_model_config": {
         #     "state_size": 2,
@@ -122,21 +123,21 @@ config = {
         #     "project_delay": 100,
         #     "project_spacing": 100, # 10,
         # }
-        "custom_model": DissipativeSimplestRINN,
-        "custom_model_config": {
-            "state_size": 2,
-            "nonlin_size": 16,
-            "log_std_init": np.log(1.0),
-            "dt": dt,
-            "plant": env,
-            "plant_config": env_config,
-            "eps": 1e-3,
-            "mode": "simple",
-            "P": np.array([[ 1.04159083e+02, -6.56387889e-01,  1.15737991e+01, -1.09562663e-02],
- [-6.56387889e-01,  2.00579719e-02, -1.73840137e-01, -7.29584950e-01],
- [ 1.15737991e+01, -1.73840137e-01,  2.42446125e+00,  8.20153731e+00],
- [-1.09562663e-02, -7.29584950e-01,  8.20153731e+00,  6.03135330e+01]])
-        }
+#         "custom_model": DissipativeSimplestRINN,
+#         "custom_model_config": {
+#             "state_size": 2,
+#             "nonlin_size": 16,
+#             "log_std_init": np.log(1.0),
+#             "dt": dt,
+#             "plant": env,
+#             "plant_config": env_config,
+#             "eps": 1e-3,
+#             "mode": "simple",
+#             "P": np.array([[ 1.04159083e+02, -6.56387889e-01,  1.15737991e+01, -1.09562663e-02],
+#  [-6.56387889e-01,  2.00579719e-02, -1.73840137e-01, -7.29584950e-01],
+#  [ 1.15737991e+01, -1.73840137e-01,  2.42446125e+00,  8.20153731e+00],
+#  [-1.09562663e-02, -7.29584950e-01,  8.20153731e+00,  6.03135330e+01]])
+#         }
         # "custom_model": LTIModel,
         # "custom_model_config": {
         #     "dt": dt,
@@ -151,7 +152,7 @@ config = {
         #     "log_std_init": np.log(1.0),
         # }
     },
-    "lr": 1e-3,
+    "lr": 1e-2,
     "num_workers": n_workers_per_task,
     "framework": "torch",
     "num_gpus": 0,  # 1,

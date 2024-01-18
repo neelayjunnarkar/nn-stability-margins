@@ -512,10 +512,7 @@ class DissipativeThetaRINN(RecurrentNetwork, nn.Module):
         Cu = torch.linalg.solve(V, NA21.t() - R @ Cpy.t() @ Duy.t()).t()
         AVT = torch.linalg.solve(
             U,
-            NA11
-            - U @ By @ Cpy @ R
-            - S @ Bpu @ (Cu @ V.t() + Duy @ Cpy @ R)
-            - S @ Ap @ R,
+            NA11 - U @ By @ Cpy @ R - S @ Bpu @ (Cu @ V.t() + Duy @ Cpy @ R) - S @ Ap @ R,
         )
         A = torch.linalg.solve(V, AVT.t()).t()
 
@@ -649,3 +646,4 @@ class DissipativeThetaRINN(RecurrentNetwork, nn.Module):
         self._cur_value = self._cur_value.reshape([-1])
 
         return outputs, [xkp1]
+ 

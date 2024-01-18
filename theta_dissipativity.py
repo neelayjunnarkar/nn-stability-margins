@@ -1,10 +1,15 @@
 # Dissipative code using the condition that is a BMI in controller parameters and storage function.
+import enum
 import time
 
 import cvxpy as cp
 import numpy as np
 
-from variable_structs import ControllerThetaParameters, PlantParameters
+from variable_structs import (
+    ControllerLTIThetaParameters,
+    ControllerThetaParameters,
+    PlantParameters,
+)
 
 
 def is_positive_semidefinite(X):
@@ -31,6 +36,7 @@ def is_positive_definite(X):
 def construct_dissipativity_matrix(
     A, Bw, Bd, Cv, Dvw, Dvd, Ce, Dew, Ded, P, LDelta, Mvw, Mww, Xdd, Xde, LX, stacker
 ):
+    """Constructs dissipativity condition from closed-loop matrices."""
     if stacker == "numpy":
         stacker = np.bmat
     elif stacker == "cvxpy":
@@ -331,7 +337,7 @@ class Projector:
         if self.proj_problem.status not in feas_stats:
             print(f"Failed to solve with status {self.proj_problem.status}")
             raise Exception()
-        print(f"Projection objective: {self.proj_problem.value}")
+        # print(f"Projection objective: {self.proj_problem.value}")
 
         # fmt: off
         new_controller_params = ControllerThetaParameters(
@@ -428,7 +434,6 @@ class Projector:
         self.pcheck_k.Dkuw.value = controller_params.Dkuw
         self.pcheck_k.Dkuy.value = controller_params.Dkuy
         self.pcheck_k.Lambda.value = controller_params.Lambda
-        print(P)
         self.pcheckP.value = P
 
         try:
@@ -455,3 +460,228 @@ class Projector:
         newLambda = self.vcheckLambda.value.toarray()
 
         return True, newP, newLambda
+
+
+class LTIProjector:
+    """Projection and verification related to dissipativity BMI, with LTI controller."""
+
+    def __init__(
+        self,
+        plant_params: PlantParameters,
+        # Epsilon to be used in enforcing definiteness of conditions
+        eps,
+        # Dimensions of variables for controller
+        output_size,
+        state_size,
+        input_size,
+    ):
+        self.plant_params = plant_params
+        self.eps = eps
+        self.output_size = output_size
+        self.state_size = state_size
+        self.input_size = input_size
+        self.nonlin_size = 1  # placeholder nonlin size used for creating zeros
+
+        assert is_positive_semidefinite(plant_params.MDeltapvv)
+        Dm, Vm = np.linalg.eigh(plant_params.MDeltapvv)
+        self.LDeltap = np.diag(np.sqrt(Dm)) @ Vm.T
+
+        assert is_positive_semidefinite(-plant_params.Xee)
+        Dx, Vx = np.linalg.eigh(-plant_params.Xee)
+        self.LX = np.diag(np.sqrt(Dx)) @ Vx.T
+
+        self._construct_projection_problem()
+        self._construct_check_dissipativity_problem()
+
+    def _construct_projection_problem(self):
+        # Define projection problem: Projecting theta into BMI parameterized by P and Lambda.
+        # Parameters
+        plant_state_size = self.plant_params.Ap.shape[0]
+        P_size = plant_state_size + self.state_size
+        self.pprojP = cp.Parameter((P_size, P_size), PSD=True)
+        pprojAk = cp.Parameter((self.state_size, self.state_size))
+        pprojBky = cp.Parameter((self.state_size, self.input_size))
+        pprojCku = cp.Parameter((self.output_size, self.state_size))
+        pprojDkuy = cp.Parameter((self.output_size, self.input_size))
+        self.pproj_k = ControllerLTIThetaParameters(pprojAk, pprojBky, pprojCku, pprojDkuy)
+
+        # Variables
+        vprojAk = cp.Variable((self.state_size, self.state_size))
+        vprojBky = cp.Variable((self.state_size, self.input_size))
+        vprojCku = cp.Variable((self.output_size, self.state_size))
+        vprojDkuy = cp.Variable((self.output_size, self.input_size))
+        self.vproj_k = ControllerLTIThetaParameters(vprojAk, vprojBky, vprojCku, vprojDkuy)
+
+        Bkw = np.zeros((self.state_size, self.nonlin_size))
+        Ckv = np.zeros((self.nonlin_size, self.state_size))
+        Dkvw = np.zeros((self.nonlin_size, self.nonlin_size))
+        Dkvy = np.zeros((self.nonlin_size, self.input_size))
+        Dkuw = np.zeros((self.output_size, self.nonlin_size))
+        Lambda = np.zeros((self.nonlin_size, self.nonlin_size))
+        controller_params = ControllerThetaParameters(
+            vprojAk, Bkw, vprojBky, Ckv, Dkvw, Dkvy, vprojCku, Dkuw, vprojDkuy, Lambda
+        )
+        # fmt: off
+        A, Bw, Bd, Cv, Dvw, Dvd, Ce, Dew, Ded, LDelta, Mvw, Mww = construct_closed_loop(
+            self.plant_params, self.LDeltap, controller_params, "cvxpy",
+        )
+        mat = construct_dissipativity_matrix(
+            A, Bw, Bd, Cv, Dvw, Dvd, Ce, Dew, Ded, self.pprojP,
+            LDelta, Mvw, Mww,
+            self.plant_params.Xdd, self.plant_params.Xde, self.LX,
+            "cvxpy",
+        )
+        # fmt: on
+
+        constraints = [
+            self.pprojP >> self.eps * np.eye(self.pprojP.shape[0]),
+            mat << 0,
+        ]
+
+        # fmt: off
+        cost_projection_error = sum([
+            cp.sum_squares(pprojAk - vprojAk),
+            cp.sum_squares(pprojBky - vprojBky),
+            cp.sum_squares(pprojCku - vprojCku),
+            cp.sum_squares(pprojDkuy - vprojDkuy),
+        ])
+        cost_size = sum([
+            cp.sum_squares(vprojAk),
+            cp.sum_squares(vprojBky),
+            cp.sum_squares(vprojCku),
+            cp.sum_squares(vprojDkuy),
+        ])
+        # fmt: on
+        objective = cost_projection_error
+
+        self.proj_problem = cp.Problem(cp.Minimize(objective), constraints)
+
+    def project(
+        self,
+        controller_params: ControllerLTIThetaParameters,
+        P,
+        solver=cp.MOSEK,
+        **kwargs,
+    ):
+        """Projects input variables to set corresponding to dissipative controllers."""
+        self.pproj_k.Ak.value = controller_params.Ak
+        self.pproj_k.Bky.value = controller_params.Bky
+        self.pproj_k.Cku.value = controller_params.Cku
+        self.pproj_k.Dkuy.value = controller_params.Dkuy
+        self.pprojP.value = P
+
+        try:
+            # t0 = time.perf_counter()
+            self.proj_problem.solve(enforce_dpp=True, solver=solver, **kwargs)
+            # t1 = time.perf_counter()
+            # print(f"Projection solving took {t1-t0} seconds.")
+        except Exception as e:
+            print(f"Failed to solve: {e}")
+            raise e
+
+        feas_stats = [
+            cp.OPTIMAL,
+            cp.UNBOUNDED,
+            cp.OPTIMAL_INACCURATE,
+            cp.UNBOUNDED_INACCURATE,
+        ]
+        if self.proj_problem.status not in feas_stats:
+            print(f"Failed to solve with status {self.proj_problem.status}")
+            raise Exception()
+        print(f"Projection objective: {self.proj_problem.value}")
+
+        new_controller_params = ControllerLTIThetaParameters(
+            self.vproj_k.Ak.value,
+            self.vproj_k.Bky.value,
+            self.vproj_k.Cku.value,
+            self.vproj_k.Dkuy.value,
+        )
+        return new_controller_params
+
+    def _construct_check_dissipativity_problem(self):
+        # Define dissipativity verification problem: find if there exists P
+        # that certify a given controller is dissipative.
+        # Parameters
+        plant_state_size = self.plant_params.Ap.shape[0]
+        P_size = plant_state_size + self.state_size
+        self.pcheckP = cp.Parameter((P_size, P_size), PSD=True)
+        pcheckAk = cp.Parameter((self.state_size, self.state_size))
+        pcheckBky = cp.Parameter((self.state_size, self.input_size))
+        pcheckCku = cp.Parameter((self.output_size, self.state_size))
+        pcheckDkuy = cp.Parameter((self.output_size, self.input_size))
+        self.pcheck_k = ControllerLTIThetaParameters(pcheckAk, pcheckBky, pcheckCku, pcheckDkuy)
+
+        # Variables
+        self.vcheckP = cp.Variable((P_size, P_size), PSD=True)
+        self.vcheckEps = cp.Variable(nonneg=True)
+
+        Bkw = np.zeros((self.state_size, self.nonlin_size))
+        Ckv = np.zeros((self.nonlin_size, self.state_size))
+        Dkvw = np.zeros((self.nonlin_size, self.nonlin_size))
+        Dkvy = np.zeros((self.nonlin_size, self.input_size))
+        Dkuw = np.zeros((self.output_size, self.nonlin_size))
+        Lambda = np.zeros((self.nonlin_size, self.nonlin_size))
+        controller_params = ControllerThetaParameters(
+            pcheckAk, Bkw, pcheckBky, Ckv, Dkvw, Dkvy, pcheckCku, Dkuw, pcheckDkuy, Lambda
+        )
+        # fmt: off
+        A, Bw, Bd, Cv, Dvw, Dvd, Ce, Dew, Ded, LDelta, Mvw, Mww = construct_closed_loop(
+            self.plant_params, self.LDeltap, controller_params, "cvxpy"
+        )
+        mat = construct_dissipativity_matrix(
+            A, Bw, Bd, Cv, Dvw, Dvd, Ce, Dew, Ded, self.vcheckP,
+            LDelta, Mvw, Mww, 
+            self.plant_params.Xdd, self.plant_params.Xde, self.LX,
+            "cvxpy"
+        )
+        # fmt: on
+
+        constraints = [
+            self.vcheckP >> self.eps * np.eye(self.vcheckP.shape[0]),
+            mat << -self.vcheckEps,
+            self.vcheckEps >= 0,
+        ]
+
+        cost_projection_error = cp.sum_squares(self.vcheckP - self.pcheckP)
+        cost_size = cp.sum_squares(self.vcheckP)
+        objective = -self.vcheckEps
+
+        self.check_problem = cp.Problem(cp.Minimize(objective), constraints)
+
+    def is_dissipative(
+        self,
+        controller_params: ControllerLTIThetaParameters,
+        P,
+        solver=cp.MOSEK,
+        **kwargs,
+    ):
+        """Checks if there exist P and Lambda that certify the controller is dissipative."""
+        self.pcheck_k.Ak.value = controller_params.Ak
+        self.pcheck_k.Bky.value = controller_params.Bky
+        self.pcheck_k.Cku.value = controller_params.Cku
+        self.pcheck_k.Dkuy.value = controller_params.Dkuy
+        self.pcheckP.value = P
+
+        try:
+            # t0 = time.perf_counter()
+            self.check_problem.solve(enforce_dpp=True, solver=solver, **kwargs)
+            # t1 = time.perf_counter()
+            # print(f"Projection solving took {t1-t0} seconds.")
+        except Exception as e:
+            print(f"Failed to solve: {e}")
+            return False, None
+
+        feas_stats = [
+            cp.OPTIMAL,
+            cp.UNBOUNDED,
+            cp.OPTIMAL_INACCURATE,
+            cp.UNBOUNDED_INACCURATE,
+        ]
+        if self.check_problem.status not in feas_stats:
+            print(f"Failed to solve with status {self.check_problem.status}")
+            return False, None, None
+        print(f"Projection objective: {self.check_problem.value}")
+
+        newP = self.vcheckP.value
+
+        return True, newP

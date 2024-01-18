@@ -7,8 +7,10 @@ from ray.rllib.models.torch.recurrent_net import RecurrentNetwork
 from ray.rllib.utils.annotations import override
 from torchdeq.norm import apply_norm, reset_norm
 
+import lti_controllers
 from activations import activations_map
-from theta_dissipativity import Projector
+from theta_dissipativity import Projector as ThetaProjector
+from thetahat_dissipativity import Projector as ThetahatProjector
 from utils import build_mlp, from_numpy, to_numpy, uniform
 from variable_structs import ControllerThetaParameters
 
@@ -64,12 +66,8 @@ class DissipativeSimplestRINN(RecurrentNetwork, nn.Module):
             2 * action_space.shape[0] == num_outputs
         ), "Num outputs should be 2 * action dimension"
 
-        self.state_size = (
-            model_config["state_size"] if "state_size" in model_config else 16
-        )
-        self.nonlin_size = (
-            model_config["nonlin_size"] if "nonlin_size" in model_config else 128
-        )
+        self.state_size = model_config["state_size"] if "state_size" in model_config else 16
+        self.nonlin_size = model_config["nonlin_size"] if "nonlin_size" in model_config else 128
         self.input_size = obs_space.shape[0]
         self.output_size = action_space.shape[0]
 
@@ -85,9 +83,7 @@ class DissipativeSimplestRINN(RecurrentNetwork, nn.Module):
         # nonlineary Delta input v, output u,
         # and nonlinearity Delta.
 
-        self.deq = torchdeq.get_deq(
-            f_solver="fixed_point_iter", f_max_iter=30, b_max_iter=30
-        )
+        self.deq = torchdeq.get_deq(f_solver="fixed_point_iter", f_max_iter=30, b_max_iter=30)
 
         log_std_init = (
             model_config["log_std_init"]
@@ -111,36 +107,83 @@ class DissipativeSimplestRINN(RecurrentNetwork, nn.Module):
         )
         self._cur_value = None
 
-        # Define parameters
-
-        # _T for transpose
-        # State x, nonlinearity Delta output w, input y,
-        # nonlineary Delta input v, output u,
-        # and nonlinearity Delta.
-        self.A_T = nn.Parameter(uniform(self.state_size, self.state_size))
-        self.Bw_T = nn.Parameter(uniform(self.nonlin_size, self.state_size))
-        self.By_T = nn.Parameter(uniform(self.input_size, self.state_size))
-
-        self.Cv_T = nn.Parameter(uniform(self.state_size, self.nonlin_size))
-        # self.Dvw_T = nn.Parameter(uniform(self.nonlin_size, self.nonlin_size))
-        self.Dvw_T = nn.Parameter(torch.zeros((self.nonlin_size, self.nonlin_size)))
-        self.Dvy_T = nn.Parameter(uniform(self.input_size, self.nonlin_size))
-
-        self.Cu_T = nn.Parameter(uniform(self.state_size, self.output_size))
-        self.Duw_T = nn.Parameter(uniform(self.nonlin_size, self.output_size))
-        self.Duy_T = nn.Parameter(uniform(self.input_size, self.output_size))
-
-        apply_norm(self, filter_out=["A_T", "Bw_T", "By_T", "Cu_T", "Duw_T", "Duy_T"])
-
         self.eps = model_config["eps"] if "eps" in model_config else 1e-6
 
         assert "plant" in model_config
         assert "plant_config" in model_config
         plant = model_config["plant"](model_config["plant_config"])
         np_plant_params = plant.get_params()
-        self.plant_params = np_plant_params.np_to_torch(device=self.A_T.device)
 
-        self.projector = Projector(
+        # Define parameters
+
+        # _T for transpose
+        # State x, nonlinearity Delta output w, input y,
+        # nonlineary Delta input v, output u,
+        # and nonlinearity Delta.
+
+        if "P" in model_config:
+            self.P = from_numpy(model_config["P"])
+
+        if "Lambda" in model_config:
+            self.Lambda = from_numpy(model_config["Lambda"])
+        else:
+            self.Lambda = torch.eye(self.nonlin_size)
+
+        self.plant_params = np_plant_params.np_to_torch(device=self.Lambda.device)
+
+        lti_initializer = (
+            model_config["lti_initializer"] if "lti_initializer" in model_config else None
+        )
+        if lti_initializer is not None:
+            print(f"Initializing using {lti_initializer} LTI controller.")
+            lti_controller_kwargs = (
+                model_config["lti_initializer_kwargs"]
+                if "lti_initializer_kwargs" in model_config
+                else {}
+            )
+            lti_controller_kwargs["state_size"] = self.state_size
+            lti_controller_kwargs["nonlin_size"] = self.nonlin_size
+            lti_controller_kwargs["input_size"] = self.input_size
+            lti_controller_kwargs["output_size"] = self.output_size
+            lti_controller, info = lti_controllers.controller_map[lti_initializer](
+                np_plant_params, **lti_controller_kwargs
+            )
+            lti_controller = lti_controller.np_to_torch(device=self.Lambda.device)
+
+            self.A_T = nn.Parameter(lti_controller.Ak.t())
+            self.Bw_T = nn.Parameter(torch.zeros(self.nonlin_size, self.state_size))
+            self.By_T = nn.Parameter(lti_controller.Bky.t())
+
+            self.Cv_T = nn.Parameter(torch.zeros(self.state_size, self.nonlin_size))
+            self.Dvw_T = nn.Parameter(torch.zeros((self.nonlin_size, self.nonlin_size)))
+            self.Dvy_T = nn.Parameter(torch.zeros(self.input_size, self.nonlin_size))
+
+            self.Cu_T = nn.Parameter(lti_controller.Cku.t())
+            self.Duw_T = nn.Parameter(torch.zeros(self.nonlin_size, self.output_size))
+            self.Duy_T = nn.Parameter(lti_controller.Dkuy.t())
+
+            if "P" in info and "P" not in model_config:
+                print("Using P from LTI initialization.")
+                self.P = from_numpy(info["P"], device=self.A_T.device)
+        else:
+            self.A_T = nn.Parameter(uniform(self.state_size, self.state_size))
+            self.Bw_T = nn.Parameter(uniform(self.nonlin_size, self.state_size))
+            self.By_T = nn.Parameter(uniform(self.input_size, self.state_size))
+
+            self.Cv_T = nn.Parameter(uniform(self.state_size, self.nonlin_size))
+            self.Dvw_T = nn.Parameter(uniform(self.nonlin_size, self.nonlin_size))
+            self.Dvy_T = nn.Parameter(uniform(self.input_size, self.nonlin_size))
+
+            self.Cu_T = nn.Parameter(uniform(self.state_size, self.output_size))
+            self.Duw_T = nn.Parameter(uniform(self.nonlin_size, self.output_size))
+            self.Duy_T = nn.Parameter(uniform(self.input_size, self.output_size))
+
+            if "P" not in model_config:
+                self.P = torch.eye(self.plant_params.Ap.shape[0] + self.state_size)
+
+        apply_norm(self, filter_out=["A_T", "Bw_T", "By_T", "Cu_T", "Duw_T", "Duy_T"])
+
+        self.theta_projector = ThetaProjector(
             np_plant_params,
             eps=self.eps,
             nonlin_size=self.nonlin_size,
@@ -149,16 +192,21 @@ class DissipativeSimplestRINN(RecurrentNetwork, nn.Module):
             input_size=self.input_size,
         )
 
-        self.mode = model_config["mode"] if "mode" in model_config else "simplest"
+        trs_mode = model_config["trs_mode"] if "trs_mode" in model_config else "variable"
+        min_trs = model_config["min_trs"] if "min_trs" in model_config else 1.0
 
-        if "P" in model_config:
-            self.P = from_numpy(model_config["P"], device=self.A_T.device)
-        else:
-            self.P = torch.eye(self.plant_params.Ap.shape[0] + self.state_size)
-        if "Lambda" in model_config:
-            self.Lambda = from_numpy(model_config["Lambda"], device=self.A_T.device)
-        else:
-            self.Lambda = torch.eye(self.nonlin_size)
+        self.thetahat_projector = ThetahatProjector(
+            np_plant_params,
+            eps=self.eps,
+            nonlin_size=self.nonlin_size,
+            output_size=self.output_size,
+            state_size=self.state_size,
+            input_size=self.input_size,
+            trs_mode=trs_mode,
+            min_trs=min_trs,
+        )
+
+        self.mode = model_config["mode"] if "mode" in model_config else "simplest"
 
         self.oldtheta = None
 
@@ -180,7 +228,7 @@ class DissipativeSimplestRINN(RecurrentNetwork, nn.Module):
                     self.Lambda
                 )
                 # fmt: on
-                is_dissipative, newP, newLambda = self.projector.is_dissipative(
+                is_dissipative, newP, newLambda = self.theta_projector.is_dissipative(
                     controller_params.torch_to_np(), to_numpy(self.P)
                 )
                 print(f"Is dissipative: {is_dissipative}")
@@ -189,6 +237,25 @@ class DissipativeSimplestRINN(RecurrentNetwork, nn.Module):
                     self.Lambda = from_numpy(newLambda)
                 else:
                     self.enforce_dissipativity()
+            elif self.mode == "thetahat":
+                print("Mode: thetahat")
+                # fmt: off
+                controller_params = ControllerThetaParameters(
+                    self.A_T.t(), self.Bw_T.t(), self.By_T.t(),
+                    self.Cv_T.t(), self.Dvw_T.t(), self.Dvy_T.t(),
+                    self.Cu_T.t(), self.Duw_T.t(), self.Duy_T.t(),
+                    self.Lambda
+                )
+                # fmt: on
+                is_dissipative, newP, newLambda = self.theta_projector.is_dissipative(
+                    controller_params.torch_to_np(), to_numpy(self.P)
+                )
+                print(f"Is dissipative: {is_dissipative}")
+                if is_dissipative:
+                    self.P = from_numpy(newP)
+                    self.Lambda = from_numpy(newLambda)
+                else:
+                    self.enforce_thetahat_dissipativity()
             else:
                 raise ValueError(f"Mode {self.mode} is unknown.")
 
@@ -199,15 +266,15 @@ class DissipativeSimplestRINN(RecurrentNetwork, nn.Module):
             torch.hstack((self.Cu_T.t(), self.Duw_T.t(), self.Duy_T.t()))
         ))
         # fmt: on
-        print_norms(self.A_T.t(), "Ak   ")
-        print_norms(self.Bw_T.t(), "Bkw  ")
-        print_norms(self.By_T.t(), "Bky  ")
-        print_norms(self.Cv_T.t(), "Ckv  ")
+        # print_norms(self.A_T.t(), "Ak   ")
+        # print_norms(self.Bw_T.t(), "Bkw  ")
+        # print_norms(self.By_T.t(), "Bky  ")
+        # print_norms(self.Cv_T.t(), "Ckv  ")
         print_norms(self.Dvw_T.t(), "Dkvw ")
-        print_norms(self.Dvy_T.t(), "Dkvy ")
-        print_norms(self.Cu_T.t(), "Cku  ")
-        print_norms(self.Duw_T.t(), "Dkuw ")
-        print_norms(self.Duy_T.t(), "Dkuy ")
+        # print_norms(self.Dvy_T.t(), "Dkvy ")
+        # print_norms(self.Cu_T.t(), "Cku  ")
+        # print_norms(self.Duw_T.t(), "Dkuw ")
+        # print_norms(self.Duy_T.t(), "Dkuy ")
         print_norms(theta, "theta")
         if self.oldtheta is not None:
             print_norms(
@@ -230,7 +297,7 @@ class DissipativeSimplestRINN(RecurrentNetwork, nn.Module):
         np_controller_params = controller_params.torch_to_np()
         P = to_numpy(self.P)
 
-        np_new_controller_params = self.projector.project(np_controller_params, P)
+        np_new_controller_params = self.theta_projector.project(np_controller_params, P)
         new_k = np_new_controller_params.np_to_torch(self.A_T.device)
 
         missing, unexpected = self.load_state_dict(
@@ -247,9 +314,57 @@ class DissipativeSimplestRINN(RecurrentNetwork, nn.Module):
             },
             strict=False,
         )
-        assert (
-            unexpected == []
-        ), f"Loading unexpected key after projection: {unexpected}"
+        assert unexpected == [], f"Loading unexpected key after projection: {unexpected}"
+        # fmt: off
+        assert missing == [
+            "log_stds", "value.0.bias", "value.0.weight_g", "value.0.weight_v",
+            "value.2.bias", "value.2.weight_g", "value.2.weight_v",
+            "value.4.bias", "value.4.weight_g", "value.4.weight_v",
+        ], missing
+        # fmt: on
+
+    def enforce_thetahat_dissipativity(self):
+        """Converts current theta, P, Lambda to thetahat and projects to dissipative set."""
+        # fmt: off
+        theta = ControllerThetaParameters(
+            self.A_T.t(), self.Bw_T.t(), self.By_T.t(),
+            self.Cv_T.t(), self.Dvw_T.t(), self.Dvy_T.t(),
+            self.Cu_T.t(), self.Duw_T.t(), self.Duy_T.t(),
+            self.Lambda
+        )
+        # fmt: on
+        thetahat = theta.torch_construct_thetahat(self.P, self.plant_params, self.eps)
+
+        thetahat = thetahat.torch_to_np()
+        new_thetahat = self.thetahat_projector.project(thetahat)
+        new_thetahat = new_thetahat.np_to_torch(device=self.A_T.device)
+
+        new_theta, P = new_thetahat.torch_construct_theta(self.plant_params, self.eps)
+
+        self.P = P
+        self.Lambda = new_thetahat.Lambda
+
+        theta.Lambda = self.Lambda
+        new_new_theta = self.theta_projector.project(theta.torch_to_np(), to_numpy(self.P))
+        new_new_theta = new_new_theta.np_to_torch(device=self.A_T.device)
+
+        new_k = new_new_theta
+
+        missing, unexpected = self.load_state_dict(
+            {
+                "A_T": new_k.Ak.t(),
+                "Bw_T": new_k.Bkw.t(),
+                "By_T": new_k.Bky.t(),
+                "Cv_T": new_k.Ckv.t(),
+                "Dvw_T": new_k.Dkvw.t(),
+                "Dvy_T": new_k.Dkvy.t(),
+                "Cu_T": new_k.Cku.t(),
+                "Duw_T": new_k.Dkuw.t(),
+                "Duy_T": new_k.Dkuy.t(),
+            },
+            strict=False,
+        )
+        assert unexpected == [], f"Loading unexpected key after projection: {unexpected}"
         # fmt: off
         assert missing == [
             "log_stds", "value.0.bias", "value.0.weight_g", "value.0.weight_v",
@@ -349,9 +464,7 @@ class DissipativeSimplestRINN(RecurrentNetwork, nn.Module):
                 wk, info = self.deq(delta_tilde, wk0)
                 assert len(wk) > 0
                 wk = wk[-1]
-            assert not torch.any(
-                torch.isnan(wk)
-            ), f"At time {k}, wk has nans: {wk}, {info}"
+            assert not torch.any(torch.isnan(wk)), f"At time {k}, wk has nans: {wk}, {info}"
 
             uk = xk @ self.Cu_T + wk @ self.Duw_T + yk @ self.Duy_T
             actions[:, k] = uk

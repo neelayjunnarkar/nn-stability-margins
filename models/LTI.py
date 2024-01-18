@@ -57,9 +57,7 @@ class LTIModel(RecurrentNetwork, nn.Module):
             )
 
         lti_controller_kwargs = (
-            model_config["lti_controller_kwargs"]
-            if "lti_controller_kwargs" in model_config
-            else {}
+            model_config["lti_controller_kwargs"] if "lti_controller_kwargs" in model_config else {}
         )
         (A, By, Cu, Duy) = lti_controllers.controller_map[lti_controller](
             **plant.get_params(), **lti_controller_kwargs
@@ -100,9 +98,7 @@ class LTIModel(RecurrentNetwork, nn.Module):
             n_layers=model_config["baseline_n_layers"]
             if "baseline_n_layers" in model_config
             else 2,
-            size=model_config["baseline_size"]
-            if "baseline_size" in model_config
-            else 64,
+            size=model_config["baseline_size"] if "baseline_size" in model_config else 64,
         )
         self._cur_value = None
 

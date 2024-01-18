@@ -119,10 +119,10 @@ class DissipativeRINN(RecurrentNetwork, nn.Module):
         self.NB = nn.Parameter(uniform(self.state_size, self.nonlin_size))
         self.NC = nn.Parameter(uniform(self.nonlin_size, self.state_size))
         self.Dvyhat = nn.Parameter(uniform(self.nonlin_size, self.input_size))
-        # self.Dvwhat = nn.Parameter(uniform(self.nonlin_size, self.nonlin_size))
-        self.Dvwhat = nn.Parameter(torch.zeros((self.nonlin_size, self.nonlin_size)))
+        self.Dvwhat = nn.Parameter(uniform(self.nonlin_size, self.nonlin_size))
+        # self.Dvwhat = nn.Parameter(torch.zeros((self.nonlin_size, self.nonlin_size)))
 
-        apply_norm(self)  # TODO(Neelay) filter out params
+        apply_norm(self) 
 
         self.eps = model_config["eps"] if "eps" in model_config else 1e-6
 

@@ -7,6 +7,7 @@ from ray.rllib.utils.annotations import override
 from utils import build_mlp, from_numpy
 import lti_controllers
 
+# TODO(Neelay) this is broken
 
 class LTIModel(RecurrentNetwork, nn.Module):
     """
@@ -48,6 +49,7 @@ class LTIModel(RecurrentNetwork, nn.Module):
         assert "plant" in model_config
         assert "plant_config" in model_config
         plant = model_config["plant"](model_config["plant_config"])
+        np_plant_params = plant.get_params()
 
         assert "lti_controller" in model_config
         lti_controller = model_config["lti_controller"]
@@ -59,6 +61,14 @@ class LTIModel(RecurrentNetwork, nn.Module):
         lti_controller_kwargs = (
             model_config["lti_controller_kwargs"] if "lti_controller_kwargs" in model_config else {}
         )
+        lti_controller_kwargs["state_size"] = self.state_size
+        lti_controller_kwargs["nonlin_size"] = self.nonlin_size
+        lti_controller_kwargs["input_size"] = self.input_size
+        lti_controller_kwargs["output_size"] = self.output_size
+        lti_controller, info = lti_controllers.controller_map[lti_controller](
+            np_plant_params, **lti_controller_kwargs
+        )
+        lti_controller = lti_controller.np_to_torch(device=self.Lambda.device)
         (A, By, Cu, Duy) = lti_controllers.controller_map[lti_controller](
             **plant.get_params(), **lti_controller_kwargs
         )

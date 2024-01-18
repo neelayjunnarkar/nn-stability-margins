@@ -33,3 +33,11 @@ This code is tested with Python 3.9 and PyTorch 1.10.
 
 ## Credits
 * The fixed point solvers in the `deq_lib` folder and the basis for the PyTorch implicit model implementation are from the [Deep Equilibrium Models](https://github.com/locuslab/deq) repository.
+
+## Setup
+
+* `poetry install`
+* Above will install some items then error. Run `poetry run pip install gym==0.21`
+* Now run `poetry install` again 
+
+Then, controller training can be run with `poetry run python train_controller.py`

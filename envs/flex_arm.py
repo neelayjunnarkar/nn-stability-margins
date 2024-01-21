@@ -2,6 +2,7 @@ import gym
 import numpy as np
 from gym import spaces
 from gym.utils import seeding
+from variable_structs import PlantParameters
 
 
 class FlexibleArmEnv(gym.Env):
@@ -86,21 +87,24 @@ class FlexibleArmEnv(gym.Env):
         self.ny = None  # Measurement output size. Defined later.
 
         # States are (x, h, xdot, hdot)
-        self.Ap = np.bmat(
-            [
+        # x is position of base of rod on cart
+        # h is horizontal deviation of tip of rod from the base of the rod
+        # fmt: off
+        self.Ap = np.bmat([
                 [np.zeros((2, 2)), np.eye(2)],
                 [-np.linalg.solve(M, K), -np.linalg.solve(M, B)],
-            ]
-        )
+        ])
         self.Ap = np.asarray(self.Ap).astype(np.float32)
         self.Bpw = np.zeros((self.nx, self.nw), dtype=np.float32)
-        self.Bpu = np.vstack(
-            [np.zeros((2, 1)), np.linalg.solve(M, np.array([[1], [0]]))]
-        )
+        self.Bpu = np.vstack([
+            np.zeros((2, 1)),
+            np.linalg.solve(M, np.array([[1], [0]]))
+        ])
         self.Bpu = np.asarray(self.Bpu).astype(np.float32)
         self.Cpv = np.zeros((self.nv, self.nx), dtype=np.float32)
         self.Dpvw = np.zeros((self.nv, self.nw), dtype=np.float32)
         self.Dpvu = np.zeros((self.nv, self.nu), dtype=np.float32)
+        # fmt: on
 
         if self.observation == "full":  # Observe full state
             if self.design_model == "flexible":
@@ -179,9 +183,7 @@ class FlexibleArmEnv(gym.Env):
             shape=(self.nu,),
             dtype=np.float32,
         )
-        x_max = np.array(
-            [self.max_x, self.max_h, self.max_xdot, self.max_hdot], dtype=np.float32
-        )
+        x_max = np.array([self.max_x, self.max_h, self.max_xdot, self.max_hdot], dtype=np.float32)
         self.state_space = spaces.Box(low=-x_max, high=x_max, dtype=np.float32)
         # if self.observation == "full":
         #     ob_max = self.Cpy @ x_max
@@ -194,13 +196,15 @@ class FlexibleArmEnv(gym.Env):
             self.Cpy = self.Cpy / self.state_space.high
 
         self.state_size = self.nx
-        self.nonlin_size = self.nv  # TODO(Neelay): this nonlin_size parameter likely only works when nv = nw. Fix.
+        self.nonlin_size = (
+            self.nv
+        )  # TODO(Neelay): this nonlin_size parameter likely only works when nv = nw. Fix.
 
         self.MDeltapvv = np.zeros((self.nv, self.nv), dtype=np.float32)
         self.MDeltapvw = np.zeros((self.nv, self.nw), dtype=np.float32)
         self.MDeltapww = np.zeros((self.nw, self.nw), dtype=np.float32)
 
-        self.max_reward = 2
+        self.max_reward = 1
 
         self.seed(env_config["seed"] if "seed" in env_config else None)
 
@@ -236,18 +240,18 @@ class FlexibleArmEnv(gym.Env):
 
         if self.disturbance_model == "none":
             d = np.zeros((self.nd,), dtype=np.float32)
-        # elif self.disturbance_model == "occasional":
-        #     # Have disturbance ocurr (in expectation) thrice a second.
-        #     p = 3 * self.dt
-        #     rand = self.np_random.uniform()
-        #     if rand < p / 2:
-        #         # print("D low")
-        #         d = 3 * self.action_space.low.astype(np.float32)
-        #     elif rand < p:
-        #         # print("D high")
-        #         d = 3 * self.action_space.high.astype(np.float32)
-        #     else:
-        #         d = np.zeros((self.nd,), dtype=np.float32)
+        elif self.disturbance_model == "occasional":
+            # Have disturbance ocurr (in expectation) twice a second.
+            p = 2 * self.dt
+            rand = self.np_random.uniform()
+            if rand < p / 2:
+                # print("D low")
+                d = 2 * self.action_space.low.astype(np.float32)
+            elif rand < p:
+                # print("D high")
+                d = 2 * self.action_space.high.astype(np.float32)
+            else:
+                d = np.zeros((self.nd,), dtype=np.float32)
         else:
             raise ValueError(f"Unexpected disturbance model: {self.disturbance_model}.")
 
@@ -256,7 +260,7 @@ class FlexibleArmEnv(gym.Env):
         # Reward for small state and small control
         reward_state = np.exp(-(np.linalg.norm(self.state) ** 2))
         reward_control = np.exp(-(np.linalg.norm(u) ** 2))
-        reward = reward_state + reward_control
+        reward = reward_control # reward_state + reward_control
 
         terminated = False
         if fail_on_time_limit and self.time >= self.time_max:
@@ -293,29 +297,39 @@ class FlexibleArmEnv(gym.Env):
 
     def get_params(self):
         if self.design_model == "flexible":
-            return {
-                "Ap": self.Ap,
-                "Bpw": self.Bpw,
-                "Bpd": self.Bpd,
-                "Bpu": self.Bpu,
-                "Cpv": self.Cpv,
-                "Dpvw": self.Dpvw,
-                "Dpvd": self.Dpvd,
-                "Dpvu": self.Dpvu,
-                "Cpe": self.Cpe,
-                "Dpew": self.Dpew,
-                "Dped": self.Dped,
-                "Dpeu": self.Dpeu,
-                "Cpy": self.Cpy,
-                "Dpyw": self.Dpyw,
-                "Dpyd": self.Dpyd,
-                "MDeltapvv": self.MDeltapvv,
-                "MDeltapvw": self.MDeltapvw,
-                "MDeltapww": self.MDeltapww,
-                "Xdd": self.Xdd,
-                "Xde": self.Xde,
-                "Xee": self.Xee,
-            }
+            # fmt: off
+            return PlantParameters(
+                self.Ap, self.Bpw, self.Bpd, self.Bpu, 
+                self.Cpv, self.Dpvw, self.Dpvd, self.Dpvu,
+                self.Cpe, self.Dpew, self.Dped, self.Dpeu,
+                self.Cpy, self.Dpyw, self.Dpyd,
+                self.MDeltapvv, self.MDeltapvw, self.MDeltapww,
+                self.Xdd, self.Xde, self.Xee
+            )
+            # fmt: on
+            # return {
+            #     "Ap": self.Ap,
+            #     "Bpw": self.Bpw,
+            #     "Bpd": self.Bpd,
+            #     "Bpu": self.Bpu,
+            #     "Cpv": self.Cpv,
+            #     "Dpvw": self.Dpvw,
+            #     "Dpvd": self.Dpvd,
+            #     "Dpvu": self.Dpvu,
+            #     "Cpe": self.Cpe,
+            #     "Dpew": self.Dpew,
+            #     "Dped": self.Dped,
+            #     "Dpeu": self.Dpeu,
+            #     "Cpy": self.Cpy,
+            #     "Dpyw": self.Dpyw,
+            #     "Dpyd": self.Dpyd,
+            #     "MDeltapvv": self.MDeltapvv,
+            #     "MDeltapvw": self.MDeltapvw,
+            #     "MDeltapww": self.MDeltapww,
+            #     "Xdd": self.Xdd,
+            #     "Xde": self.Xde,
+            #     "Xee": self.Xee,
+            # }
         elif self.design_model == "rigid":
             # Can copy some because dimensions are same as with flexible model
             nx = 2
@@ -333,53 +347,60 @@ class FlexibleArmEnv(gym.Env):
                 Cpy = np.array([[1, 0]], dtype=np.float32)
             else:
                 raise ValueError(f"Unexpected observavion: {self.observation}")
-            return {
-                "Ap": Ap,
-                "Bpw": np.zeros((nx, self.nw), dtype=np.float32),
-                "Bpd": Bpd,
-                "Bpu": Bpu,
-                "Cpv": np.zeros((self.nv, nx), dtype=np.float32),
-                "Dpvw": self.Dpvw,
-                "Dpvd": self.Dpvd,
-                "Dpvu": self.Dpvu,
-                "Cpe": np.eye(nx, dtype=np.float32),
-                "Dpew": np.zeros((nx, self.nw), dtype=np.float32),
-                "Dped": np.zeros((nx, self.nd), dtype=np.float32),
-                "Dpeu": np.zeros((nx, self.nu), dtype=np.float32),
-                "Cpy": Cpy,
-                "Dpyw": self.Dpyw,
-                "Dpyd": self.Dpyd,
-                "MDeltapvv": self.MDeltapvv,
-                "MDeltapvw": self.MDeltapvw,
-                "MDeltapww": self.MDeltapww,
-                "Xdd": self.Xdd,
-                "Xde": self.Xde,
-                "Xee": self.Xee,
-            }
+            Bpw = np.zeros((nx, self.nw), dtype=np.float32)
+            Cpv = np.zeros((self.nv, nx), dtype=np.float32)
+            Cpe = np.eye(nx, dtype=np.float32)
+            Dpew = np.zeros((nx, self.nw), dtype=np.float32)
+            Dped = np.zeros((nx, self.nd), dtype=np.float32)
+            Dpeu = np.zeros((nx, self.nu), dtype=np.float32)
+            # fmt: off
+            return PlantParameters(
+                Ap, Bpw, Bpd, Bpu,
+                Cpv, self.Dpvw, self.Dpvd, self.Dpvu,
+                Cpe, Dpew, Dped, Dpeu,
+                Cpy, self.Dpyw, self.Dpyd,
+                self.MDeltapvv, self.MDeltapvw, self.MDeltapww,
+                self.Xdd, self.Xde, self.Xee
+            )
+        # fmt: on
+        # return {
+        #     "Ap": Ap,
+        #     "Bpw": np.zeros((nx, self.nw), dtype=np.float32),
+        #     "Bpd": Bpd,
+        #     "Bpu": Bpu,
+        #     "Cpv": np.zeros((self.nv, nx), dtype=np.float32),
+        #     "Dpvw": self.Dpvw,
+        #     "Dpvd": self.Dpvd,
+        #     "Dpvu": self.Dpvu,
+        #     "Cpe": np.eye(nx, dtype=np.float32),
+        #     "Dpew": np.zeros((nx, self.nw), dtype=np.float32),
+        #     "Dped": np.zeros((nx, self.nd), dtype=np.float32),
+        #     "Dpeu": np.zeros((nx, self.nu), dtype=np.float32),
+        #     "Cpy": Cpy,
+        #     "Dpyw": self.Dpyw,
+        #     "Dpyd": self.Dpyd,
+        #     "MDeltapvv": self.MDeltapvv,
+        #     "MDeltapvw": self.MDeltapvw,
+        #     "MDeltapww": self.MDeltapww,
+        #     "Xdd": self.Xdd,
+        #     "Xde": self.Xde,
+        #     "Xee": self.Xee,
+        # }
         else:
             raise ValueError(f"Unknown design model: {self.design_model}")
 
     def check_parameter_sizes(self):
         assert (
             self.Ap.shape[0] == self.nx
-            and self.Ap.shape[0]
-            == self.Bpw.shape[0]
-            == self.Bpd.shape[0]
-            == self.Bpu.shape[0]
+            and self.Ap.shape[0] == self.Bpw.shape[0] == self.Bpd.shape[0] == self.Bpu.shape[0]
         ), f"{self.Ap.shape}, {self.Bpw.shape}, {self.Bpd.shape}, {self.Bpu.shape}"
         assert (
             self.Cpv.shape[0] == self.nv
-            and self.Cpv.shape[0]
-            == self.Dpvw.shape[0]
-            == self.Dpvd.shape[0]
-            == self.Dpvu.shape[0]
+            and self.Cpv.shape[0] == self.Dpvw.shape[0] == self.Dpvd.shape[0] == self.Dpvu.shape[0]
         ), f"{self.Cpv.shape}, {self.Dpvw.shape}, {self.Dpvd.shape}, {self.Dpvu.shape}"
         assert (
             self.Cpe.shape[0] == self.ne
-            and self.Cpe.shape[0]
-            == self.Dpew.shape[0]
-            == self.Dped.shape[0]
-            == self.Dpeu.shape[0]
+            and self.Cpe.shape[0] == self.Dpew.shape[0] == self.Dped.shape[0] == self.Dpeu.shape[0]
         ), f"{self.Cpe.shape}, {self.Dpew.shape}, {self.Dped.shape}, {self.Dpeu.shape}"
         assert (
             self.Cpy.shape[0] == self.ny
@@ -387,24 +408,15 @@ class FlexibleArmEnv(gym.Env):
         ), f"{self.Cpy.shape}, {self.Dpyw.shape}, {self.Dpyd.shape}"
         assert (
             self.Ap.shape[1] == self.nx
-            and self.Ap.shape[1]
-            == self.Cpv.shape[1]
-            == self.Cpe.shape[1]
-            == self.Cpy.shape[1]
+            and self.Ap.shape[1] == self.Cpv.shape[1] == self.Cpe.shape[1] == self.Cpy.shape[1]
         ), f"{self.Ap.shape}, {self.Cpv.shape}, {self.Cpe.shape}, {self.Cpy.shape}"
         assert (
             self.Bpw.shape[1] == self.nw
-            and self.Bpw.shape[1]
-            == self.Dpvw.shape[1]
-            == self.Dpew.shape[1]
-            == self.Dpyw.shape[1]
+            and self.Bpw.shape[1] == self.Dpvw.shape[1] == self.Dpew.shape[1] == self.Dpyw.shape[1]
         ), f"{self.Bpw.shape}, {self.Dpvw.shape}, {self.Dpew.shape}, {self.Dpyw.shape}"
         assert (
             self.Bpd.shape[1] == self.nd
-            and self.Bpd.shape[1]
-            == self.Dpvd.shape[1]
-            == self.Dped.shape[1]
-            == self.Dpyd.shape[1]
+            and self.Bpd.shape[1] == self.Dpvd.shape[1] == self.Dped.shape[1] == self.Dpyd.shape[1]
         ), f"{self.Bpd.shape}, {self.Dvpd.shape}, {self.Dped.shape}, {self.Dpyd.shape}"
         assert (
             self.Bpu.shape[1] == self.nu

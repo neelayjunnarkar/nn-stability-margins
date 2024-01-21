@@ -254,7 +254,7 @@ class Projector:
 
         # fmt: off
         constraints = [
-            self.vtrs >= self.min_trs,
+            # self.vtrs >= self.min_trs,
             self.vThetahat.S >> self.eps * np.eye(self.vThetahat.S.shape[0]),
             self.vThetahat.R >> self.eps * np.eye(self.vThetahat.R.shape[0]),
             self.vThetahat.Lambda >> self.eps * np.eye(self.vThetahat.Lambda.shape[0]),
@@ -264,6 +264,8 @@ class Projector:
             ]) >> self.eps * np.eye(self.vThetahat.R.shape[0] + self.vThetahat.S.shape[0]),
             mat << 0,
         ]
+        if self.trs_mode == "variable":
+            constraints.append(self.vtrs >= self.min_trs)
 
 
         cost_projection_error = sum([

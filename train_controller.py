@@ -75,19 +75,7 @@ config = {
         #     "dt": dt,
         #     "log_std_init": np.log(1.0)
         # }
-        # "custom_model": DissipativeRINN,
-        # "custom_model_config": {
-        #     "state_size": 2,
-        #     "nonlin_size": 16,
-        #     "log_std_init": np.log(1.0),
-        #     "dt": dt,
-        #     "plant": env,
-        #     "plant_config": env_config,
-        #     "eps": 1e-3,
-        #     "trs_mode": "fixed",
-        #     "min_trs": 1.44,
-        # }
-        "custom_model": RINN,
+        "custom_model": DissipativeRINN,
         "custom_model_config": {
             "state_size": 2,
             "nonlin_size": 16,
@@ -96,7 +84,20 @@ config = {
             "plant": env,
             "plant_config": env_config,
             "eps": 1e-3,
+            "trs_mode": "fixed",
+            # "min_trs": 1.73, 
+            "min_trs": 1.44,
         }
+        # "custom_model": RINN,
+        # "custom_model_config": {
+        #     "state_size": 2,
+        #     "nonlin_size": 16,
+        #     "log_std_init": np.log(1.0),
+        #     "dt": dt,
+        #     "plant": env,
+        #     "plant_config": env_config,
+        #     "eps": 1e-3,
+        # }
         # "custom_model": DissipativeThetaRINN,
         # "custom_model_config": {
         #     "state_size": 2,
@@ -120,7 +121,10 @@ config = {
 #             "plant": env,
 #             "plant_config": env_config,
 #             "eps": 1e-3,
-#             "mode": "simple",
+#             # "mode": "simple",
+#             "mode": "thetahat",
+#             "trs_mode": "fixed",
+#             "min_trs": 1.73,
 # #             "P": np.array([[ 1.04159083e+02, -6.56387889e-01,  1.15737991e+01, -1.09562663e-02],
 # #  [-6.56387889e-01,  2.00579719e-02, -1.73840137e-01, -7.29584950e-01],
 # #  [ 1.15737991e+01, -1.73840137e-01,  2.42446125e+00,  8.20153731e+00],
@@ -137,11 +141,11 @@ config = {
 #                 #     [ 0.1563, -0.0332,  0.2260,  0.4052],
 #                 #     [-0.0719, -0.0791,  0.4052,  1.3935]])
 #             # }
-#             "lti_initializer": "dissipative_thetahat",
-#             "lti_initializer_kwargs": {
-#                 "trs_mode": "fixed",
-#                 "min_trs": 1.44
-#             }
+#             # "lti_initializer": "dissipative_thetahat",
+#             # "lti_initializer_kwargs": {
+#             #     "trs_mode": "fixed",
+#             #     "min_trs": 1.44
+#             # }
 #         }
         # "custom_model": LTIModel,
         # "custom_model_config": {

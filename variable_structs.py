@@ -121,7 +121,7 @@ class ControllerThetaParameters:
         # fmt: on
         return theta
 
-    def torch_construct_thetahat(self, P, plant_params, eps=1e-3):
+    def torch_construct_thetahat(self, P, plant_params: PlantParameters, eps=1e-3):
         """Construct thetahat parameters from self and P"""
         state_size = self.Ak.shape[0]
         assert state_size == plant_params.Ap.shape[0]
@@ -268,7 +268,7 @@ class ControllerThetahatParameters:
             S, R, NA11, NA12, NA21, NA22, NB, NC, Dkuw, Dkvyhat, Dkvwhat, Lambda
         )
 
-    def torch_construct_theta(self, plant_params, eps=1e-3):
+    def torch_construct_theta(self, plant_params: PlantParameters, eps=1e-3):
         """Construct theta, the parameters of the controller, from thetahat,
         the decision variables for the dissipativity condition."""
 
@@ -358,6 +358,36 @@ class ControllerLTIThetaParameters:
         Dkuy = from_numpy(self.Dkuy, device=device)
         return ControllerLTIThetaParameters(Ak, Bky, Cku, Dkuy)
 
+    def torch_construct_thetahat(self, P, plant_params: PlantParameters):
+        state_size = self.Ak.shape[0]
+        input_size = self.Bky.shape[1]
+        output_size = self.Cku.shape[0]
+        nonlin_size = 1
+
+        nonlin_theta = ControllerThetaParameters(
+            Ak=self.Ak,
+            Bkw=self.Ak.new_zeros((state_size, nonlin_size)),
+            Bky=self.Bky,
+            Ckv=self.Ak.new_zeros((nonlin_size, state_size)),
+            Dkvw=self.Ak.new_zeros((nonlin_size, nonlin_size)),
+            Dkvy=self.Ak.new_zeros((nonlin_size, input_size)),
+            Cku=self.Cku,
+            Dkuw=self.Ak.new_zeros((output_size, nonlin_size)),
+            Dkuy=self.Dkuy,
+            Lambda=self.Ak.new_zeros((nonlin_size, nonlin_size)),
+        )
+        nonlin_thetahat = nonlin_theta.torch_construct_thetahat(P, plant_params)
+
+        thetahat = ControllerLTIThetahatParameters(
+            nonlin_thetahat.S,
+            nonlin_thetahat.R,
+            nonlin_thetahat.NA11,
+            nonlin_thetahat.NA12,
+            nonlin_thetahat.NA21,
+            nonlin_thetahat.NA22,
+        )
+        return thetahat
+
 
 @dataclass
 class ControllerLTIThetahatParameters:
@@ -385,6 +415,27 @@ class ControllerLTIThetahatParameters:
         NA21 = from_numpy(self.NA21, device=device)
         NA22 = from_numpy(self.NA22, device=device)
         return ControllerLTIThetahatParameters(S, R, NA11, NA12, NA21, NA22)
+    
+    def torch_construct_theta(self, plant_params: PlantParameters):
+        nonlin_size = 1
+        output_size = plant_params.Bpu.shape[1]
+        input_size = plant_params.Cpy.shape[0]
+
+        nonlin_thetahat = ControllerThetahatParameters(
+            self.S, self.R, self.NA11, self.NA12, self.NA21, self.NA22,
+            NB=self.S.new_zeros((self.S.shape[0], nonlin_size)),
+            NC=self.S.new_zeros((nonlin_size, self.R.shape[1])),
+            Dkuw=self.S.new_zeros((output_size, nonlin_size)),
+            Dkvyhat=self.S.new_zeros((nonlin_size, input_size)),
+            Dkvwhat=self.S.new_zeros((nonlin_size, nonlin_size)),
+            Lambda=self.S.new_zeros((nonlin_size, nonlin_size))
+        )
+        nonlin_theta, P = nonlin_thetahat.torch_construct_theta(plant_params)
+        
+        theta = ControllerLTIThetaParameters(
+            nonlin_theta.Ak, nonlin_theta.Bky, nonlin_theta.Cku, nonlin_theta.Dkuy
+        )
+        return theta, P
 
 
 # Other reconstruction methods

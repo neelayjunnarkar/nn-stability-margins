@@ -679,7 +679,7 @@ class LTIProjector:
         ]
         if self.check_problem.status not in feas_stats:
             print(f"Failed to solve with status {self.check_problem.status}")
-            return False, None, None
+            return False, None
         print(f"Projection objective: {self.check_problem.value}")
 
         newP = self.vcheckP.value

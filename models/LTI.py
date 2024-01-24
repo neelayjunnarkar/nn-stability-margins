@@ -11,9 +11,6 @@ from thetahat_dissipativity import LTIProjector as LTIThetahatProjector
 from utils import build_mlp, from_numpy, to_numpy
 from variable_structs import ControllerLTIThetaParameters
 
-# TODO(Neelay) this is broken
-
-
 class LTIModel(RecurrentNetwork, nn.Module):
     """
     An LTI system of the following form:
@@ -38,6 +35,8 @@ class LTIModel(RecurrentNetwork, nn.Module):
         num_outputs,
         model_config,
         name,
+        *args,
+        **kwargs,
     ):
         nn.Module.__init__(self)
         super().__init__(obs_space, action_space, num_outputs, model_config, name)

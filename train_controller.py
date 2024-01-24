@@ -28,33 +28,33 @@ from models import (
 )
 from trainers import ProjectedPPOTrainer
 
-# N_CPUS = 1  # test
-N_CPUS = multiprocessing.cpu_count() / 2
+N_CPUS = 1  # test
+# N_CPUS = multiprocessing.cpu_count() / 2
 # N_CPUS  = int(os.getenv('SLURM_CPUS_ON_NODE'))
 n_tasks = 1
 n_workers_per_task = int(math.floor(N_CPUS / n_tasks)) - 1 - 1
 
 # Same dt must be used in RNN and RINN and DissipativeRINN
-dt = 0.01
-env = InvertedPendulumEnv
+# dt = 0.01
+# env = InvertedPendulumEnv
+# env_config = {
+#     "observation": "partial",
+#     "normed": True,
+#     "dt": dt,
+#     "supply_rate": "stability",
+#     "disturbance_model": "occasional"
+# }
+dt = 0.0001
+env = FlexibleArmEnv
 env_config = {
     "observation": "partial",
     "normed": True,
-    "factor": 1,
     "dt": dt,
-    "supply_rate": "stability",
-    "disturbance_model": "occasional"
+    "supply_rate": "l2_gain",
+    "disturbance_model": "none",
+    "disturbance_design_model": "occasional",
+    "design_model": "rigid",
 }
-# env = FlexibleArmEnv
-# env_config = {
-#     "observation": "full",
-#     "normed": True,
-#     "factor": 1,
-#     "dt": dt,
-#     "supply_rate": "stability",
-#     "disturbance_model": "none",
-#     "design_model": "flexible",
-# }
 
 # Configure the algorithm.
 config = {
@@ -63,7 +63,7 @@ config = {
     "model": {
         # "custom_model": FullyConnectedNetwork,
         # "custom_model_config": {
-        #     "n_layers": 2,
+        #     "n_layers": 4,
         #     "size": 16
         # }
         # "custom_model": ImplicitModel,
@@ -77,7 +77,7 @@ config = {
         # }
         # "custom_model": DissipativeRINN,
         # "custom_model_config": {
-        #     "state_size": 2,
+        #     "state_size": 4, # 2,
         #     "nonlin_size": 16,
         #     "log_std_init": np.log(1.0),
         #     "dt": dt,
@@ -86,18 +86,18 @@ config = {
         #     "eps": 1e-3,
         #     "trs_mode": "fixed",
         #     # "min_trs": 1.73, 
-        #     "min_trs": 1.44,
+        #     "min_trs": 3.33 # 1.44,
         # }
-        # "custom_model": RINN,
-        # "custom_model_config": {
-        #     "state_size": 2,
-        #     "nonlin_size": 16,
-        #     "log_std_init": np.log(1.0),
-        #     "dt": dt,
-        #     "plant": env,
-        #     "plant_config": env_config,
-        #     "eps": 1e-3,
-        # }
+        "custom_model": RINN,
+        "custom_model_config": {
+            "state_size": 2,
+            "nonlin_size": 16,
+            "log_std_init": np.log(1.0),
+            "dt": dt,
+            "plant": env,
+            "plant_config": env_config,
+            "eps": 1e-3,
+        }
         # "custom_model": DissipativeThetaRINN,
         # "custom_model_config": {
         #     "state_size": 2,
@@ -124,7 +124,7 @@ config = {
 #             # "mode": "simple",
 #             "mode": "thetahat",
 #             "trs_mode": "fixed",
-#             "min_trs": 1.73,
+#             "min_trs": 1.5, # 1.73,
 # #             "P": np.array([[ 1.04159083e+02, -6.56387889e-01,  1.15737991e+01, -1.09562663e-02],
 # #  [-6.56387889e-01,  2.00579719e-02, -1.73840137e-01, -7.29584950e-01],
 # #  [ 1.15737991e+01, -1.73840137e-01,  2.42446125e+00,  8.20153731e+00],
@@ -141,34 +141,33 @@ config = {
 #                 #     [ 0.1563, -0.0332,  0.2260,  0.4052],
 #                 #     [-0.0719, -0.0791,  0.4052,  1.3935]])
 #             # }
-#             # "lti_initializer": "dissipative_thetahat",
-#             # "lti_initializer_kwargs": {
-#             #     "trs_mode": "fixed",
-#             #     "min_trs": 1.44
-#             # }
+#             "lti_initializer": "dissipative_thetahat",
+#             "lti_initializer_kwargs": {
+#                 "trs_mode": "fixed",
+#                 "min_trs": 1.5, # 1.44
+#             }
 #         }
-        "custom_model": LTIModel,
-        "custom_model_config": {
-            "dt": dt,
-            "plant": env,
-            "plant_config": env_config,
-            "learn": False,
-            "log_std_init": np.log(1.0),
-            "state_size": 2,
-            "trs_mode": "fixed",
-            "min_trs": 1.44,
-            "lti_controller": "dissipative_thetahat",
-            "lti_initializer_kwargs": {
-                "trs_mode": "fixed",
-                "min_trs": 1.44
-            },
-            # "lti_controller": "lqr",
-            # "lti_controller_kwargs": {
-            #     "Q": np.eye(2, dtype=np.float32),
-            #     "R": np.array([[1]], dtype=np.float32)
-            # },
-            
-        }
+        # "custom_model": LTIModel,
+        # "custom_model_config": {
+        #     "dt": dt,
+        #     "plant": env,
+        #     "plant_config": env_config,
+        #     "learn": True,
+        #     "log_std_init": np.log(1.0),
+        #     "state_size": 2,
+        #     "trs_mode": "fixed",
+        #     "min_trs": 1.5, # 1.44,
+        #     "lti_controller": "dissipative_thetahat",
+        #     "lti_initializer_kwargs": {
+        #         "trs_mode": "fixed",
+        #         "min_trs": 1.5 # 1.44
+        #     },
+        #     # "lti_controller": "lqr",
+        #     # "lti_controller_kwargs": {
+        #     #     "Q": np.eye(2, dtype=np.float32),
+        #     #     "R": np.array([[1]], dtype=np.float32)
+        #     # },
+        # }
     },
     "lr": 1e-3,
     "num_workers": n_workers_per_task,

@@ -11,9 +11,6 @@ class FlexibleArmEnv(gym.Env):
     """
 
     def __init__(self, env_config):
-        assert "factor" in env_config
-        factor = env_config["factor"]
-
         assert "observation" in env_config
         self.observation = env_config["observation"]
 
@@ -26,8 +23,13 @@ class FlexibleArmEnv(gym.Env):
         assert "design_model" in env_config
         self.design_model = env_config["design_model"]
 
-        self.factor = factor
-        self.viewer = None
+        if "disturbance_design_model" in env_config:
+            self.disturbance_design_model = env_config["disturbance_design_model"]
+        else:
+            self.disturbance_design_model = self.disturbance_model
+
+        assert "supply_rate" in env_config
+        self.supply_rate = env_config["supply_rate"]
 
         if "dt" in env_config:  # Discretization time (s)
             self.dt = env_config["dt"]
@@ -44,17 +46,7 @@ class FlexibleArmEnv(gym.Env):
         self.I = (np.pi / 4) * self.r**4  # Area second moment of inertia (m^4)
         self.EI = self.E * self.I
         self.flexdamp = 0.9
-
         self.Mr = self.mb + self.mt + self.rho * self.L  # Total mass (Kg)
-        M = np.array(
-            [
-                [self.Mr, self.mt + self.rho * self.L / 3],
-                [self.mt + self.rho * self.L / 3, self.mt + self.rho * self.L / 5],
-            ],
-            dtype=np.float32,
-        )
-        K = np.array([[0, 0], [0, 4 * self.EI / (self.L**3)]], dtype=np.float32)
-        B = np.diag([0, self.flexdamp]).astype(np.float32)
 
         self.max_force = 200
         self.max_x = 1.5
@@ -78,105 +70,52 @@ class FlexibleArmEnv(gym.Env):
         # y is measurement output, and Deltap is the uncertainty.
         # Suffix p indicates plant parameter.
 
-        self.nx = 4  # Plant state size
-        self.nw = 1  # Output size of uncertainty Deltap
-        self.nd = None  # Disturbance size. Defined based on supply_rate.
-        self.nu = 1  # Control input size
-        self.nv = 1  # Input size to uncertainty Deltap
-        self.ne = None  # Performance output size. Defined based on supply_rate.
-        self.ny = None  # Measurement output size. Defined later.
-
         # States are (x, h, xdot, hdot)
         # x is position of base of rod on cart
         # h is horizontal deviation of tip of rod from the base of the rod
         # fmt: off
-        self.Ap = np.bmat([
-                [np.zeros((2, 2)), np.eye(2)],
-                [-np.linalg.solve(M, K), -np.linalg.solve(M, B)],
-        ])
-        self.Ap = np.asarray(self.Ap).astype(np.float32)
-        self.Bpw = np.zeros((self.nx, self.nw), dtype=np.float32)
-        self.Bpu = np.vstack([
-            np.zeros((2, 1)),
-            np.linalg.solve(M, np.array([[1], [0]]))
-        ])
-        self.Bpu = np.asarray(self.Bpu).astype(np.float32)
-        self.Cpv = np.zeros((self.nv, self.nx), dtype=np.float32)
-        self.Dpvw = np.zeros((self.nv, self.nw), dtype=np.float32)
-        self.Dpvu = np.zeros((self.nv, self.nu), dtype=np.float32)
-        # fmt: on
 
-        if self.observation == "full":  # Observe full state
-            if self.design_model == "flexible":
-                self.ny = self.nx
-                self.Cpy = np.eye(self.nx, dtype=np.float32)
-            elif self.design_model == "rigid":
-                self.ny = 2
-                self.Cpy = np.array([[1, 1, 0, 0], [0, 0, 1, 1]], dtype=np.float32)
-            else:
-                raise ValueError(f"Design model: {self.design_model} unexpected")
-        elif self.observation == "partial":  # Observe sum of x and h
-            self.ny = 1
-            self.Cpy = np.array([[1, 1, 0, 0]], dtype=np.float32)
+        true_model = self._build_flex_model(self.observation, self.disturbance_model, self.supply_rate)
+
+        if self.design_model == "flexible":
+            self.design_model = self._build_flex_model(self.observation, self.disturbance_design_model, self.supply_rate)
+        elif self.design_model == "rigid":
+            self.design_model = self._build_rigid_model(self.observation, self.disturbance_design_model, self.supply_rate)
         else:
-            raise ValueError(
-                f"observation {self.observation} must be one of 'partial', 'full', 'rigid_full'"
-            )
-        self.Dpyw = np.zeros((self.ny, self.nw), dtype=np.float32)
-        # Dpyu is always 0
-
-        assert "supply_rate" in env_config
-        self.supply_rate = env_config["supply_rate"]
-        if self.supply_rate == "stability":
-            print(
-                "Plant using stability construction for disturbance, performance output, and supply rate."
-            )
-            self.nd = 1
-            self.ne = self.nx
-
-            alpha = 0
-
-            self.Bpd = np.zeros((self.nx, self.nd), dtype=np.float32)
-            self.Dpvd = np.zeros((self.nv, self.nd), dtype=np.float32)
-            self.Dpyd = np.zeros((self.ny, self.nd), dtype=np.float32)
-
-            self.Cpe = np.eye(self.nx, dtype=np.float32)
-            self.Dpew = np.zeros((self.ne, self.nw), dtype=np.float32)
-            self.Dped = np.zeros((self.ne, self.nd), dtype=np.float32)
-            self.Dpeu = np.zeros((self.ne, self.nu), dtype=np.float32)
-
-            self.Xdd = 0 * np.eye(self.nd, dtype=np.float32)
-            self.Xde = np.zeros((self.nd, self.ne), dtype=np.float32)
-            self.Xee = -alpha * np.eye(self.ne, dtype=np.float32)
-        elif self.supply_rate == "l2_gain":
-            print(
-                "Plant using L2 gain construction for disturbance, performance output, and supply rate."
-            )
-            # Supply rate for L2 gain of 0.99 from disturbance into input to output being the state
-            self.nd = self.nu
-            self.ne = self.nx
-
-            self.Bpd = self.Bpu.copy()
-            self.Dpvd = np.zeros((self.nv, self.nd), dtype=np.float32)
-            self.Dpyd = np.zeros((self.ny, self.nd), dtype=np.float32)
-
-            self.Cpe = np.eye(self.nx, dtype=np.float32)
-            self.Dpew = np.zeros((self.ne, self.nw), dtype=np.float32)
-            self.Dped = np.zeros((self.ne, self.nd), dtype=np.float32)
-            self.Dpeu = np.zeros((self.ne, self.nu), dtype=np.float32)
-
-            gamma = 0.99
-            self.Xdd = gamma * np.eye(self.nd, dtype=np.float32)
-            self.Xde = np.zeros((self.nd, self.ne), dtype=np.float32)
-            self.Xee = -np.eye(self.ne, dtype=np.float32)
-        else:
-            raise ValueError(
-                f"Supply rate {self.supply_rate} must be one of: 'stability', 'l2_gain'."
-            )
-
+            raise ValueError(f"Unexpected design model: {self.design_model}.")
+        
+        self.Ap = true_model.Ap
+        self.Bpw = true_model.Bpw
+        self.Bpd = true_model.Bpd
+        self.Bpu = true_model.Bpu
+        self.Cpv = true_model.Cpv
+        self.Dpvw = true_model.Dpvw
+        self.Dpvd = true_model.Dpvd
+        self.Dpvu = true_model.Dpvu
+        self.Cpe = true_model.Cpe
+        self.Dpew = true_model.Dpew
+        self.Dped = true_model.Dped
+        self.Dpeu = true_model.Dpeu
+        self.Cpy = true_model.Cpy
+        self.Dpyw = true_model.Dpyw
+        self.Dpyd = true_model.Dpyd
+        self.MDeltapvv = true_model.MDeltapvv
+        self.MDeltapvw = true_model.MDeltapvw
+        self.MDeltapww = true_model.MDeltapww
+        self.Xdd = true_model.Xdd
+        self.Xde = true_model.Xde
+        self.Xee = true_model.Xee
         # Make sure dimensions of parameters match up.
+        self.nx = self.Ap.shape[0]
+        self.nw = self.Bpw.shape[1]
+        self.nd = self.Bpd.shape[1]
+        self.nu = self.Bpu.shape[1]
+        self.nv = self.Cpv.shape[0]
+        self.ne = self.Cpe.shape[0]
+        self.ny = self.Cpy.shape[0]
         self.check_parameter_sizes()
 
+    
         self.action_space = spaces.Box(
             low=-self.max_force,
             high=self.max_force,
@@ -185,26 +124,17 @@ class FlexibleArmEnv(gym.Env):
         )
         x_max = np.array([self.max_x, self.max_h, self.max_xdot, self.max_hdot], dtype=np.float32)
         self.state_space = spaces.Box(low=-x_max, high=x_max, dtype=np.float32)
-        # if self.observation == "full":
-        #     ob_max = self.Cpy @ x_max
-        # else:
-        #     ob_max = np.array([self.max_x + self.max_h], dtype=np.float32)
+
         ob_max = self.Cpy @ x_max
         self.observation_space = spaces.Box(low=-ob_max, high=ob_max, dtype=np.float32)
-
         if normed:
             self.Cpy = self.Cpy / self.state_space.high
 
         self.state_size = self.nx
-        self.nonlin_size = (
-            self.nv
-        )  # TODO(Neelay): this nonlin_size parameter likely only works when nv = nw. Fix.
+        # TODO(Neelay): this nonlin_size parameter likely only works when nv = nw. Fix.
+        self.nonlin_size = self.nv
 
-        self.MDeltapvv = np.zeros((self.nv, self.nv), dtype=np.float32)
-        self.MDeltapvw = np.zeros((self.nv, self.nw), dtype=np.float32)
-        self.MDeltapww = np.zeros((self.nw, self.nw), dtype=np.float32)
-
-        self.max_reward = 1
+        self.max_reward = 2
 
         self.seed(env_config["seed"] if "seed" in env_config else None)
 
@@ -246,10 +176,10 @@ class FlexibleArmEnv(gym.Env):
             rand = self.np_random.uniform()
             if rand < p / 2:
                 # print("D low")
-                d = 2 * self.action_space.low.astype(np.float32)
+                d = 1 * self.action_space.low.astype(np.float32)
             elif rand < p:
                 # print("D high")
-                d = 2 * self.action_space.high.astype(np.float32)
+                d = 1 * self.action_space.high.astype(np.float32)
             else:
                 d = np.zeros((self.nd,), dtype=np.float32)
         else:
@@ -260,7 +190,7 @@ class FlexibleArmEnv(gym.Env):
         # Reward for small state and small control
         reward_state = np.exp(-(np.linalg.norm(self.state) ** 2))
         reward_control = np.exp(-(np.linalg.norm(u) ** 2))
-        reward = reward_control # reward_state + reward_control
+        reward = reward_state + reward_control
 
         terminated = False
         if fail_on_time_limit and self.time >= self.time_max:
@@ -296,98 +226,175 @@ class FlexibleArmEnv(gym.Env):
         return self.Cpy @ self.state  # TODO(Neelay): generalize
 
     def get_params(self):
-        if self.design_model == "flexible":
-            # fmt: off
-            return PlantParameters(
-                self.Ap, self.Bpw, self.Bpd, self.Bpu, 
-                self.Cpv, self.Dpvw, self.Dpvd, self.Dpvu,
-                self.Cpe, self.Dpew, self.Dped, self.Dpeu,
-                self.Cpy, self.Dpyw, self.Dpyd,
-                self.MDeltapvv, self.MDeltapvw, self.MDeltapww,
-                self.Xdd, self.Xde, self.Xee
-            )
-            # fmt: on
-            # return {
-            #     "Ap": self.Ap,
-            #     "Bpw": self.Bpw,
-            #     "Bpd": self.Bpd,
-            #     "Bpu": self.Bpu,
-            #     "Cpv": self.Cpv,
-            #     "Dpvw": self.Dpvw,
-            #     "Dpvd": self.Dpvd,
-            #     "Dpvu": self.Dpvu,
-            #     "Cpe": self.Cpe,
-            #     "Dpew": self.Dpew,
-            #     "Dped": self.Dped,
-            #     "Dpeu": self.Dpeu,
-            #     "Cpy": self.Cpy,
-            #     "Dpyw": self.Dpyw,
-            #     "Dpyd": self.Dpyd,
-            #     "MDeltapvv": self.MDeltapvv,
-            #     "MDeltapvw": self.MDeltapvw,
-            #     "MDeltapww": self.MDeltapww,
-            #     "Xdd": self.Xdd,
-            #     "Xde": self.Xde,
-            #     "Xee": self.Xee,
-            # }
-        elif self.design_model == "rigid":
-            # Can copy some because dimensions are same as with flexible model
-            nx = 2
-            Ap = np.array([[0, 1], [0, 0]], dtype=np.float32)
-            Bpu = np.array([[0], [1.0 / self.Mr]], dtype=np.float32)
-            if self.supply_rate == "stability":
-                Bpd = np.zeros((nx, self.nd), dtype=np.float32)
-            elif self.supply_rate == "l2_gain":
-                Bpd = Bpu.copy()
-            else:
-                raise ValueError(f"Unexpected supply rate: {self.supply_rate}")
-            if self.observation == "full":
-                Cpy = np.eye(2, dtype=np.float32)
-            elif self.observation == "partial":
-                Cpy = np.array([[1, 0]], dtype=np.float32)
-            else:
-                raise ValueError(f"Unexpected observavion: {self.observation}")
-            Bpw = np.zeros((nx, self.nw), dtype=np.float32)
-            Cpv = np.zeros((self.nv, nx), dtype=np.float32)
-            Cpe = np.eye(nx, dtype=np.float32)
-            Dpew = np.zeros((nx, self.nw), dtype=np.float32)
-            Dped = np.zeros((nx, self.nd), dtype=np.float32)
-            Dpeu = np.zeros((nx, self.nu), dtype=np.float32)
-            # fmt: off
-            return PlantParameters(
-                Ap, Bpw, Bpd, Bpu,
-                Cpv, self.Dpvw, self.Dpvd, self.Dpvu,
-                Cpe, Dpew, Dped, Dpeu,
-                Cpy, self.Dpyw, self.Dpyd,
-                self.MDeltapvv, self.MDeltapvw, self.MDeltapww,
-                self.Xdd, self.Xde, self.Xee
-            )
-        # fmt: on
-        # return {
-        #     "Ap": Ap,
-        #     "Bpw": np.zeros((nx, self.nw), dtype=np.float32),
-        #     "Bpd": Bpd,
-        #     "Bpu": Bpu,
-        #     "Cpv": np.zeros((self.nv, nx), dtype=np.float32),
-        #     "Dpvw": self.Dpvw,
-        #     "Dpvd": self.Dpvd,
-        #     "Dpvu": self.Dpvu,
-        #     "Cpe": np.eye(nx, dtype=np.float32),
-        #     "Dpew": np.zeros((nx, self.nw), dtype=np.float32),
-        #     "Dped": np.zeros((nx, self.nd), dtype=np.float32),
-        #     "Dpeu": np.zeros((nx, self.nu), dtype=np.float32),
-        #     "Cpy": Cpy,
-        #     "Dpyw": self.Dpyw,
-        #     "Dpyd": self.Dpyd,
-        #     "MDeltapvv": self.MDeltapvv,
-        #     "MDeltapvw": self.MDeltapvw,
-        #     "MDeltapww": self.MDeltapww,
-        #     "Xdd": self.Xdd,
-        #     "Xde": self.Xde,
-        #     "Xee": self.Xee,
-        # }
+        return self.design_model
+
+    def _build_flex_model(self, observation, disturbance_model, supply_rate):
+        nx = 4  # Plant state size
+        nw = 1  # Output size of uncertainty Deltap
+        nd = None  # Disturbance size. Defined based on disturbance model.
+        nu = 1  # Control input size
+        nv = 1  # Input size to uncertainty Deltap
+        ne = None  # Performance output size. Defined based on supply_rate.
+        ny = None  # Measurement output size. Defined based on observation.
+        M = np.array(
+            [
+                [self.Mr, self.mt + self.rho * self.L / 3],
+                [self.mt + self.rho * self.L / 3, self.mt + self.rho * self.L / 5],
+            ],
+            dtype=np.float32,
+        )
+        K = np.array([[0, 0], [0, 4 * self.EI / (self.L**3)]], dtype=np.float32)
+        B = np.diag([0, self.flexdamp]).astype(np.float32)
+
+        Ap = np.bmat(
+            [
+                [np.zeros((2, 2)), np.eye(2)],
+                [-np.linalg.solve(M, K), -np.linalg.solve(M, B)],
+            ]
+        )
+        Ap = np.asarray(Ap).astype(np.float32)
+        Bpw = np.zeros((nx, nw), dtype=np.float32)
+        Bpu = np.vstack([np.zeros((2, 1)), np.linalg.solve(M, np.array([[1], [0]]))])
+        Bpu = np.asarray(Bpu).astype(np.float32)
+
+        Cpv = np.zeros((nv, nx), dtype=np.float32)
+        Dpvw = np.zeros((nv, nw), dtype=np.float32)
+        Dpvu = np.zeros((nv, nu), dtype=np.float32)
+
+        if observation == "full":  # Observe full state
+            ny = nx
+            Cpy = np.eye(nx, dtype=np.float32)
+        elif observation == "partial":  # Observe sum of x and h
+            ny = 1
+            Cpy = np.array([[1, 1, 0, 0]], dtype=np.float32)
         else:
-            raise ValueError(f"Unknown design model: {self.design_model}")
+            raise ValueError(f"observation {observation} must be one of 'partial', 'full'")
+        Dpyw = np.zeros((ny, nw), dtype=np.float32)
+        # Dpyu is always 0
+
+        if disturbance_model == "none":
+            nd = 1
+            Bpd = np.zeros((nx, nd), dtype=np.float32)
+            Dpvd = np.zeros((nv, nd), dtype=np.float32)
+            Dpyd = np.zeros((ny, nd), dtype=np.float32)
+        elif disturbance_model == "occasional":
+            nd = nu
+            Bpd = Bpu.copy()
+            Dpvd = np.zeros((nv, nd), dtype=np.float32)
+            Dpyd = np.zeros((ny, nd), dtype=np.float32)
+        else:
+            raise ValueError(f"Unexpected disturbance model: {disturbance_model}.")
+
+        if supply_rate == "stability":
+            ne = nx
+            Cpe = np.eye(nx, dtype=np.float32)
+            Dpew = np.zeros((ne, nw), dtype=np.float32)
+            Dped = np.zeros((ne, nd), dtype=np.float32)
+            Dpeu = np.zeros((ne, nu), dtype=np.float32)
+
+            Xdd = np.zeros((nd, nd), dtype=np.float32)
+            Xde = np.zeros((nd, ne), dtype=np.float32)
+            Xee = np.zeros((ne, ne), dtype=np.float32)
+        elif supply_rate == "l2_gain":
+            ne = nx
+            Cpe = np.eye(nx, dtype=np.float32)
+            Dpew = np.zeros((ne, nw), dtype=np.float32)
+            Dped = np.zeros((ne, nd), dtype=np.float32)
+            Dpeu = np.zeros((ne, nu), dtype=np.float32)
+
+            gamma = 0.99
+            Xdd = gamma * np.eye(nd, dtype=np.float32)
+            Xde = np.zeros((nd, ne), dtype=np.float32)
+            Xee = -np.eye(ne, dtype=np.float32)
+        else:
+            raise ValueError(f"Supply rate {supply_rate} must be one of: 'stability', 'l2_gain'.")
+
+        MDeltapvv = np.zeros((nv, nv), dtype=np.float32)
+        MDeltapvw = np.zeros((nv, nw), dtype=np.float32)
+        MDeltapww = np.zeros((nw, nw), dtype=np.float32)
+
+        # fmt: off
+        return PlantParameters(
+            Ap, Bpw, Bpd, Bpu, Cpv, Dpvw, Dpvd, Dpvu, Cpe, Dpew, Dped, Dpeu, Cpy, Dpyw, Dpyd,
+            MDeltapvv, MDeltapvw, MDeltapww, Xdd, Xde, Xee
+        )
+        # fmt: on
+
+    def _build_rigid_model(self, observation, disturbance_model, supply_rate):
+        nx = 2
+        nw = 1  # Output size of uncertainty Deltap
+        nd = None  # Disturbance size. Defined based on disturbance_model.
+        nu = 1  # Control input size
+        nv = 1  # Input size to uncertainty Deltap
+        ne = None  # Performance output size. Defined based on supply_rate.
+        ny = None  # Measurement output size. Defined based on observation.
+
+        Ap = np.array([[0, 1], [0, 0]], dtype=np.float32)
+        Bpw = np.zeros((nx, nw), dtype=np.float32)
+        Bpu = np.array([[0], [1.0 / self.Mr]], dtype=np.float32)
+
+        Cpv = np.zeros((nv, nx), dtype=np.float32)
+        Dpvw = np.zeros((nv, nw), dtype=np.float32)
+        Dpvu = np.zeros((nv, nu), dtype=np.float32)
+
+        if observation == "full":  # Observe position and velocity
+            ny = 2
+            Cpy = np.eye(2, dtype=np.float32)
+        elif observation == "partial":  # Observe only position
+            ny = 1
+            Cpy = np.array([[1, 0]], dtype=np.float32)
+        else:
+            raise ValueError(f"observation {observation} must be one of 'partial', 'full'")
+        Dpyw = np.zeros((ny, nw), dtype=np.float32)
+        # Dpyu is always 0
+
+        if disturbance_model == "none":
+            nd = 1
+            Bpd = np.zeros((nx, nd), dtype=np.float32)
+            Dpvd = np.zeros((nv, nd), dtype=np.float32)
+            Dpyd = np.zeros((ny, nd), dtype=np.float32)
+        elif disturbance_model == "occasional":
+            nd = nu
+            Bpd = Bpu.copy()
+            Dpvd = np.zeros((nv, nd), dtype=np.float32)
+            Dpyd = np.zeros((ny, nd), dtype=np.float32)
+        else:
+            raise ValueError(f"Unexpected disturbance model: {disturbance_model}.")
+
+        if self.supply_rate == "stability":
+            ne = nx
+            Cpe = np.eye(nx, dtype=np.float32)
+            Dpew = np.zeros((ne, nw), dtype=np.float32)
+            Dped = np.zeros((ne, nd), dtype=np.float32)
+            Dpeu = np.zeros((ne, nu), dtype=np.float32)
+
+            Xdd = np.zeros((nd, nd), dtype=np.float32)
+            Xde = np.zeros((nd, ne), dtype=np.float32)
+            Xee = np.zeros((ne, ne), dtype=np.float32)
+        elif self.supply_rate == "l2_gain":
+            ne = nx
+            Cpe = np.eye(nx, dtype=np.float32)
+            Dpew = np.zeros((ne, nw), dtype=np.float32)
+            Dped = np.zeros((ne, nd), dtype=np.float32)
+            Dpeu = np.zeros((ne, nu), dtype=np.float32)
+
+            gamma = 0.99
+            Xdd = gamma * np.eye(nd, dtype=np.float32)
+            Xde = np.zeros((nd, ne), dtype=np.float32)
+            Xee = -np.eye(ne, dtype=np.float32)
+        else:
+            raise ValueError(f"Unexpected supply rate: {self.supply_rate}")
+
+        MDeltapvv = np.zeros((nv, nv), dtype=np.float32)
+        MDeltapvw = np.zeros((nv, nw), dtype=np.float32)
+        MDeltapww = np.zeros((nw, nw), dtype=np.float32)
+
+        # fmt: off
+        return PlantParameters(
+            Ap, Bpw, Bpd, Bpu, Cpv, Dpvw, Dpvd, Dpvu, Cpe, Dpew, Dped, Dpeu, Cpy, Dpyw, Dpyd,
+            MDeltapvv, MDeltapvw, MDeltapww, Xdd, Xde, Xee
+        )
+        # fmt: on
 
     def check_parameter_sizes(self):
         assert (

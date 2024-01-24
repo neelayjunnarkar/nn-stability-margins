@@ -84,6 +84,12 @@ class InvertedPendulumEnv(gym.Env):
         self.Dpyw = np.zeros((self.ny, self.nw), dtype=np.float32)
         # Dpyu is always 0
 
+        # Disturbance enters into control input
+        # self.nd = self.nu
+        # self.Bpd = self.Bpu.copy()
+        # self.Dpvd = np.zeros((self.nv, self.nd), dtype=np.float32)
+        # self.Dpyd = np.zeros((self.ny, self.nd), dtype=np.float32)
+
         assert "supply_rate" in env_config
         if env_config["supply_rate"] == "stability":
             print("Plant using stability construction for disturbance, performance output, and supply rate.")
@@ -107,7 +113,7 @@ class InvertedPendulumEnv(gym.Env):
             self.Xee = -alpha * np.eye(self.ne, dtype=np.float32)
         elif env_config["supply_rate"] == "l2_gain":
             print("Plant using L2 gain construction for disturbance, performance output, and supply rate.")
-            # Supply rate for L2 gain of 0.99 from disturbance into input to output being the state
+            # Supply rate for L2 gain of 0.99 from disturbance to output being the state
             self.nd = self.nu
             self.ne = self.nx
 
@@ -205,10 +211,8 @@ class InvertedPendulumEnv(gym.Env):
             p = 3*self.dt
             rand = self.np_random.uniform()
             if rand < p/2:
-                # print("D low")
                 d = 3*self.action_space.low.astype(np.float32)
             elif rand < p:
-                # print("D high")
                 d = 3*self.action_space.high.astype(np.float32)
             else:
                 d = np.zeros((self.nd,), dtype=np.float32)
@@ -254,9 +258,6 @@ class InvertedPendulumEnv(gym.Env):
     def get_obs(self):
         return self.Cpy @ self.state  # TODO(Neelay): generalize
 
-    def is_nonlin(self):
-        return True
-
     def get_params(self):
         return PlantParameters(
             self.Ap, self.Bpw, self.Bpd, self.Bpu, 
@@ -266,58 +267,6 @@ class InvertedPendulumEnv(gym.Env):
             self.MDeltapvv, self.MDeltapvw, self.MDeltapww,
             self.Xdd, self.Xde, self.Xee
         )
-        # return {
-        #     "Ap": self.Ap,
-        #     "Bpw": self.Bpw,
-        #     "Bpd": self.Bpd,
-        #     "Bpu": self.Bpu,
-        #     "Cpv": self.Cpv,
-        #     "Dpvw": self.Dpvw,
-        #     "Dpvd": self.Dpvd,
-        #     "Dpvu": self.Dpvu,
-        #     "Cpe": self.Cpe,
-        #     "Dpew": self.Dpew,
-        #     "Dped": self.Dped,
-        #     "Dpeu": self.Dpeu,
-        #     "Cpy": self.Cpy,
-        #     "Dpyw": self.Dpyw,
-        #     "Dpyd": self.Dpyd,
-        #     "MDeltapvv": self.MDeltapvv,
-        #     "MDeltapvw": self.MDeltapvw,
-        #     "MDeltapww": self.MDeltapww,
-        #     "Xdd": self.Xdd,
-        #     "Xde": self.Xde,
-        #     "Xee": self.Xee,
-        # }
-        # Test for ProjREN
-        # AG = np.array(
-        #     [[1, self.dt], [0, 1 - (self.dt * self.mu) / (self.m * self.l**2)]],
-        #     dtype=np.float32,
-        # )
-
-        # BG1 = np.array(
-        #     [[0], [(self.g * self.dt) / self.l]], dtype=np.float32
-        # )
-        # BG2 = (
-        #     np.array([[0], [self.dt / (self.m * self.l**2)]], dtype=np.float32)
-        # )
-        # # if observation == "full":
-        # #     self.CG1 = np.eye(self.nx, dtype=np.float32)
-        # # elif observation == "partial":
-        # CG1 = np.array([[1, 0]], dtype=np.float32)
-
-        # CG2 = np.array([[1, 0]], dtype=np.float32)
-        # DG3 = np.array([[0]], dtype=np.float32)
-        # return [
-        #     AG,
-        #     BG1,
-        #     BG2,
-        #     CG1,
-        #     CG2,
-        #     DG3,
-        #     self.C_Delta,
-        #     self.D_Delta,
-        # ]
 
     def check_parameter_sizes(self):
         assert (

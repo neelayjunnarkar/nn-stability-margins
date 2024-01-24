@@ -44,12 +44,13 @@ n_workers_per_task = int(math.floor(N_CPUS / n_tasks)) - 1 - 1
 #     "supply_rate": "stability",
 #     "disturbance_model": "occasional"
 # }
-dt = 0.0001
+dt = 0.001 # 0.0001
 env = FlexibleArmEnv
 env_config = {
     "observation": "partial",
     "normed": True,
     "dt": dt,
+    "rollout_length": 2000,
     "supply_rate": "l2_gain",
     "disturbance_model": "none",
     "disturbance_design_model": "occasional",

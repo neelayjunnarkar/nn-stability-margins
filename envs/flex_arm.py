@@ -34,7 +34,12 @@ class FlexibleArmEnv(gym.Env):
         if "dt" in env_config:  # Discretization time (s)
             self.dt = env_config["dt"]
         else:
-            self.dt = 0.01
+            self.dt = 0.0001
+
+        if "rollout_length" in env_config:
+            self.time_max = env_config["rollout_length"]
+        else:
+            self.time_max = 1000  # 0.1 seconds with dt = 0.0001
 
         self.mb = 1  # Mass of base (Kg)
         self.mt = 0.1  # Mass of tip (Kg)
@@ -53,7 +58,6 @@ class FlexibleArmEnv(gym.Env):
         self.max_h = 0.66 * self.L
         self.max_xdot = 25
         self.max_hdot = 200
-        self.time_max = 1000  # 10 seconds with dt = 0.01
 
         # State xp is (theta, thetadot) where theta is angle from vertical,
         # with theta=0 being inverted, and thetadot is derivative of theta.
@@ -83,7 +87,7 @@ class FlexibleArmEnv(gym.Env):
             self.design_model = self._build_rigid_model(self.observation, self.disturbance_design_model, self.supply_rate)
         else:
             raise ValueError(f"Unexpected design model: {self.design_model}.")
-        
+
         self.Ap = true_model.Ap
         self.Bpw = true_model.Bpw
         self.Bpd = true_model.Bpd
@@ -115,7 +119,7 @@ class FlexibleArmEnv(gym.Env):
         self.ny = self.Cpy.shape[0]
         self.check_parameter_sizes()
 
-    
+
         self.action_space = spaces.Box(
             low=-self.max_force,
             high=self.max_force,

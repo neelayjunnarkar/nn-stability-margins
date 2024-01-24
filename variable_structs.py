@@ -415,27 +415,52 @@ class ControllerLTIThetahatParameters:
         NA21 = from_numpy(self.NA21, device=device)
         NA22 = from_numpy(self.NA22, device=device)
         return ControllerLTIThetahatParameters(S, R, NA11, NA12, NA21, NA22)
-    
-    def torch_construct_theta(self, plant_params: PlantParameters):
-        nonlin_size = 1
-        output_size = plant_params.Bpu.shape[1]
-        input_size = plant_params.Cpy.shape[0]
 
-        nonlin_thetahat = ControllerThetahatParameters(
-            self.S, self.R, self.NA11, self.NA12, self.NA21, self.NA22,
-            NB=self.S.new_zeros((self.S.shape[0], nonlin_size)),
-            NC=self.S.new_zeros((nonlin_size, self.R.shape[1])),
-            Dkuw=self.S.new_zeros((output_size, nonlin_size)),
-            Dkvyhat=self.S.new_zeros((nonlin_size, input_size)),
-            Dkvwhat=self.S.new_zeros((nonlin_size, nonlin_size)),
-            Lambda=self.S.new_zeros((nonlin_size, nonlin_size))
+    def torch_construct_theta(self, plant_params: PlantParameters):
+        """Construct theta, the parameters of the controller, from thetahat,
+        the decision variables for the dissipativity condition."""
+        state_size = self.S.shape[0]
+
+        # np.linalg.solve(A, B) solves for X in AX = B, and assumes A is invertible
+
+        # Construct V and U by solving VU^T = I - RS
+        svdU, svdSigma, svdV_T = torch.linalg.svd(torch.eye(state_size) - self.R @ self.S)
+        sqrt_svdSigma = torch.diag(torch.sqrt(svdSigma))
+        V = svdU @ sqrt_svdSigma
+        U = svdV_T.t() @ sqrt_svdSigma
+
+        # Construct P via P = [I, S; 0, U^T] Y^-1
+        # fmt: off
+        Y = torch.vstack((
+            torch.hstack((self.R, torch.eye(self.R.shape[0]))),
+            torch.hstack((V.t(), torch.zeros((V.t().shape[0], self.R.shape[0]))))
+        ))
+        Y2 = torch.vstack((
+            torch.hstack((torch.eye(self.S.shape[0]), self.S)),
+            torch.hstack((torch.zeros((U.t().shape[0], self.S.shape[0])), U.t()))
+        ))
+        # fmt: on
+        P = torch.linalg.solve(Y.t(), Y2.t())
+        P = 0.5 * (P + P.t())
+
+        Ap = plant_params.Ap
+        Bpu = plant_params.Bpu
+        Cpy = plant_params.Cpy
+
+        Duy = self.NA22
+        By = torch.linalg.solve(U, self.NA12 - self.S @ Bpu @ Duy)
+        Cu = torch.linalg.solve(V, self.NA21.t() - self.R @ Cpy.t() @ Duy.t()).t()
+        AVT = torch.linalg.solve(
+            U,
+            self.NA11
+            - U @ By @ Cpy @ self.R
+            - self.S @ Bpu @ (Cu @ V.t() + Duy @ Cpy @ self.R)
+            - self.S @ Ap @ self.R,
         )
-        nonlin_theta, P = nonlin_thetahat.torch_construct_theta(plant_params)
-        
-        theta = ControllerLTIThetaParameters(
-            nonlin_theta.Ak, nonlin_theta.Bky, nonlin_theta.Cku, nonlin_theta.Dkuy
-        )
-        return theta, P
+        A = torch.linalg.solve(V, AVT.t()).t()
+
+        controller = ControllerLTIThetaParameters(Ak=A, Bky=By, Cku=Cu, Dkuy=Duy)
+        return controller, P
 
 
 # Other reconstruction methods

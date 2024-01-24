@@ -161,7 +161,7 @@ class LTIModel(RecurrentNetwork, nn.Module):
 
     def enforce_dissipativity(self):
         """Converts current theta, P, Lambda to thetahat and projects to dissipative set."""
-        assert self.learning
+        assert self.learn
 
         theta = ControllerLTIThetaParameters(
             self.A_T.t(), self.By_T.t(), self.Cu_T.t(), self.Duy_T.t()

@@ -89,16 +89,16 @@ config = {
         #     # "min_trs": 1.73, 
         #     "min_trs": 3.33 # 1.44,
         # }
-        "custom_model": RINN,
-        "custom_model_config": {
-            "state_size": 2,
-            "nonlin_size": 16,
-            "log_std_init": np.log(1.0),
-            "dt": dt,
-            "plant": env,
-            "plant_config": env_config,
-            "eps": 1e-3,
-        }
+        # "custom_model": RINN,
+        # "custom_model_config": {
+        #     "state_size": 2,
+        #     "nonlin_size": 16,
+        #     "log_std_init": np.log(1.0),
+        #     "dt": dt,
+        #     "plant": env,
+        #     "plant_config": env_config,
+        #     "eps": 1e-3,
+        # }
         # "custom_model": DissipativeThetaRINN,
         # "custom_model_config": {
         #     "state_size": 2,
@@ -148,27 +148,27 @@ config = {
 #                 "min_trs": 1.5, # 1.44
 #             }
 #         }
-        # "custom_model": LTIModel,
-        # "custom_model_config": {
-        #     "dt": dt,
-        #     "plant": env,
-        #     "plant_config": env_config,
-        #     "learn": True,
-        #     "log_std_init": np.log(1.0),
-        #     "state_size": 2,
-        #     "trs_mode": "fixed",
-        #     "min_trs": 1.5, # 1.44,
-        #     "lti_controller": "dissipative_thetahat",
-        #     "lti_initializer_kwargs": {
-        #         "trs_mode": "fixed",
-        #         "min_trs": 1.5 # 1.44
-        #     },
-        #     # "lti_controller": "lqr",
-        #     # "lti_controller_kwargs": {
-        #     #     "Q": np.eye(2, dtype=np.float32),
-        #     #     "R": np.array([[1]], dtype=np.float32)
-        #     # },
-        # }
+        "custom_model": LTIModel,
+        "custom_model_config": {
+            "dt": dt,
+            "plant": env,
+            "plant_config": env_config,
+            "learn": True,
+            "log_std_init": np.log(1.0),
+            "state_size": 2,
+            "trs_mode": "fixed",
+            "min_trs": 1.5, # 1.44,
+            "lti_controller": "dissipative_thetahat",
+            "lti_initializer_kwargs": {
+                "trs_mode": "fixed",
+                "min_trs": 1.5 # 1.44
+            },
+            # "lti_controller": "lqr",
+            # "lti_controller_kwargs": {
+            #     "Q": np.eye(2, dtype=np.float32),
+            #     "R": np.array([[1]], dtype=np.float32)
+            # },
+        }
     },
     "lr": 1e-3,
     "num_workers": n_workers_per_task,

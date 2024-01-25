@@ -195,6 +195,7 @@ class FlexibleArmEnv(gym.Env):
         reward_state = np.exp(-(np.linalg.norm(self.state) ** 2))
         reward_control = np.exp(-(np.linalg.norm(u) ** 2))
         reward = reward_state + reward_control
+        # reward = reward_control
 
         terminated = False
         if fail_on_time_limit and self.time >= self.time_max:

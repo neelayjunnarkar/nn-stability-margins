@@ -125,9 +125,9 @@ class DissipativeSimplestRINN(RecurrentNetwork, nn.Module):
             self.P = from_numpy(model_config["P"])
 
         if "Lambda" in model_config:
-            self.Lambda = from_numpy(model_config["Lambda"])
+            self.Lambda = from_numpy(model_config["Lambda"], device=self.log_stds.device)
         else:
-            self.Lambda = torch.eye(self.nonlin_size)
+            self.Lambda = torch.eye(self.nonlin_size, device=self.log_stds.device)
 
         self.plant_params = np_plant_params.np_to_torch(device=self.Lambda.device)
 
@@ -142,7 +142,6 @@ class DissipativeSimplestRINN(RecurrentNetwork, nn.Module):
                 else {}
             )
             lti_controller_kwargs["state_size"] = self.state_size
-            lti_controller_kwargs["nonlin_size"] = self.nonlin_size
             lti_controller_kwargs["input_size"] = self.input_size
             lti_controller_kwargs["output_size"] = self.output_size
             lti_controller, info = lti_controllers.controller_map[lti_initializer](
@@ -165,6 +164,8 @@ class DissipativeSimplestRINN(RecurrentNetwork, nn.Module):
             if "P" in info and "P" not in model_config:
                 print("Using P from LTI initialization.")
                 self.P = from_numpy(info["P"], device=self.A_T.device)
+            # Might not want the following
+            self.Lambda = torch.zeros((self.nonlin_size, self.nonlin_size), device=self.A_T.device)
         else:
             self.A_T = nn.Parameter(uniform(self.state_size, self.state_size))
             self.Bw_T = nn.Parameter(uniform(self.nonlin_size, self.state_size))
@@ -210,7 +211,9 @@ class DissipativeSimplestRINN(RecurrentNetwork, nn.Module):
 
         self.oldtheta = None
 
-        self.project()
+        # Maybe want to always project
+        if lti_initializer is None:
+            self.project()
 
     def project(self):
         """Modify parameters to ensure satisfaction of dissipativity condition."""

@@ -14,10 +14,20 @@ from variable_structs import (
 # TODO(Neelay) Standardize inputs to these functions
 
 
-def lqr(Ap=None, Bpu=None, Q=None, R=None, N=None, **_kwargs):
+def lqr(
+    plant_params: PlantParameters,
+    output_size=None,
+    state_size=None,
+    input_size=None,
+    Q=None,
+    R=None,
+    N=None,
+    **kwargs,
+):
+    assert state_size is not None
+    Ap = plant_params.Ap
+    Bpu = plant_params.Bpu
     # Only works for state-feedback.
-    assert Ap is not None
-    assert Bpu is not None
     assert Q is not None
     assert R is not None
     # N can be None
@@ -25,11 +35,12 @@ def lqr(Ap=None, Bpu=None, Q=None, R=None, N=None, **_kwargs):
         K, S, E = ct.lqr(Ap, Bpu, Q, R)
     else:
         K, S, E = ct.lqr(Ap, Bpu, Q, R, N)
+    print(K)
 
     # Construct LTI controller
-    nx = 1
-    ny = Ap.shape[0]
-    nu = Bpu.shape[1]
+    nx = state_size
+    ny = input_size
+    nu = output_size
     controller = ControllerLTIThetaParameters(
         Ak=np.zeros((nx, nx)), Bky=np.zeros((nx, ny)), Cku=np.zeros((nu, nx)), Dkuy=-K
     )

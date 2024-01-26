@@ -2,6 +2,7 @@ import gym
 import numpy as np
 from gym import spaces
 from gym.utils import seeding
+
 from variable_structs import PlantParameters
 
 
@@ -21,7 +22,7 @@ class FlexibleArmEnv(gym.Env):
         self.disturbance_model = env_config["disturbance_model"]
 
         assert "design_model" in env_config
-        self.design_model = env_config["design_model"]
+        design_model = env_config["design_model"]
 
         if "disturbance_design_model" in env_config:
             self.disturbance_design_model = env_config["disturbance_design_model"]
@@ -53,7 +54,7 @@ class FlexibleArmEnv(gym.Env):
         self.flexdamp = 0.9
         self.Mr = self.mb + self.mt + self.rho * self.L  # Total mass (Kg)
 
-        self.max_force = 200
+        self.max_force = 20  # 200
         self.max_x = 1.5
         self.max_h = 0.66 * self.L
         self.max_xdot = 25
@@ -79,36 +80,36 @@ class FlexibleArmEnv(gym.Env):
         # h is horizontal deviation of tip of rod from the base of the rod
         # fmt: off
 
-        true_model = self._build_flex_model(self.observation, self.disturbance_model, self.supply_rate)
+        self.true_model = self._build_true_model(self.observation, design_model, self.disturbance_model, self.supply_rate)
 
-        if self.design_model == "flexible":
-            self.design_model = self._build_flex_model(self.observation, self.disturbance_design_model, self.supply_rate)
-        elif self.design_model == "rigid":
-            self.design_model = self._build_rigid_model(self.observation, self.disturbance_design_model, self.supply_rate)
+        if design_model == "flexible":
+            self.design_model = self._build_true_model(self.observation, "flexible", self.disturbance_design_model, self.supply_rate)
+        elif design_model == "rigid":
+            self.design_model = self._build_design_model(self.observation, self.disturbance_design_model, self.supply_rate)
         else:
-            raise ValueError(f"Unexpected design model: {self.design_model}.")
+            raise ValueError(f"Unexpected design model: {design_model}.")
 
-        self.Ap = true_model.Ap
-        self.Bpw = true_model.Bpw
-        self.Bpd = true_model.Bpd
-        self.Bpu = true_model.Bpu
-        self.Cpv = true_model.Cpv
-        self.Dpvw = true_model.Dpvw
-        self.Dpvd = true_model.Dpvd
-        self.Dpvu = true_model.Dpvu
-        self.Cpe = true_model.Cpe
-        self.Dpew = true_model.Dpew
-        self.Dped = true_model.Dped
-        self.Dpeu = true_model.Dpeu
-        self.Cpy = true_model.Cpy
-        self.Dpyw = true_model.Dpyw
-        self.Dpyd = true_model.Dpyd
-        self.MDeltapvv = true_model.MDeltapvv
-        self.MDeltapvw = true_model.MDeltapvw
-        self.MDeltapww = true_model.MDeltapww
-        self.Xdd = true_model.Xdd
-        self.Xde = true_model.Xde
-        self.Xee = true_model.Xee
+        self.Ap = self.true_model.Ap
+        self.Bpw = self.true_model.Bpw
+        self.Bpd = self.true_model.Bpd
+        self.Bpu = self.true_model.Bpu
+        self.Cpv = self.true_model.Cpv
+        self.Dpvw = self.true_model.Dpvw
+        self.Dpvd = self.true_model.Dpvd
+        self.Dpvu = self.true_model.Dpvu
+        self.Cpe = self.true_model.Cpe
+        self.Dpew = self.true_model.Dpew
+        self.Dped = self.true_model.Dped
+        self.Dpeu = self.true_model.Dpeu
+        self.Cpy = self.true_model.Cpy
+        self.Dpyw = self.true_model.Dpyw
+        self.Dpyd = self.true_model.Dpyd
+        self.MDeltapvv = self.true_model.MDeltapvv
+        self.MDeltapvw = self.true_model.MDeltapvw
+        self.MDeltapww = self.true_model.MDeltapww
+        self.Xdd = self.true_model.Xdd
+        self.Xde = self.true_model.Xde
+        self.Xee = self.true_model.Xee
         # Make sure dimensions of parameters match up.
         self.nx = self.Ap.shape[0]
         self.nw = self.Bpw.shape[1]
@@ -119,7 +120,6 @@ class FlexibleArmEnv(gym.Env):
         self.ny = self.Cpy.shape[0]
         self.check_parameter_sizes()
 
-
         self.action_space = spaces.Box(
             low=-self.max_force,
             high=self.max_force,
@@ -129,16 +129,18 @@ class FlexibleArmEnv(gym.Env):
         x_max = np.array([self.max_x, self.max_h, self.max_xdot, self.max_hdot], dtype=np.float32)
         self.state_space = spaces.Box(low=-x_max, high=x_max, dtype=np.float32)
 
-        ob_max = self.Cpy @ x_max
-        self.observation_space = spaces.Box(low=-ob_max, high=ob_max, dtype=np.float32)
         if normed:
             self.Cpy = self.Cpy / self.state_space.high
+        ob_max = self.Cpy @ x_max
+        self.observation_space = spaces.Box(low=-ob_max, high=ob_max, dtype=np.float32)
+
 
         self.state_size = self.nx
         # TODO(Neelay): this nonlin_size parameter likely only works when nv = nw. Fix.
         self.nonlin_size = self.nv
 
-        self.max_reward = 2
+        self.max_reward = 2.0
+        # self.max_reward = 1.0
 
         self.seed(env_config["seed"] if "seed" in env_config else None)
 
@@ -179,10 +181,8 @@ class FlexibleArmEnv(gym.Env):
             p = 2 * self.dt
             rand = self.np_random.uniform()
             if rand < p / 2:
-                # print("D low")
                 d = 1 * self.action_space.low.astype(np.float32)
             elif rand < p:
-                # print("D high")
                 d = 1 * self.action_space.high.astype(np.float32)
             else:
                 d = np.zeros((self.nd,), dtype=np.float32)
@@ -195,6 +195,15 @@ class FlexibleArmEnv(gym.Env):
         reward_state = np.exp(-(np.linalg.norm(self.state) ** 2))
         reward_control = np.exp(-(np.linalg.norm(u) ** 2))
         reward = reward_state + reward_control
+
+        # reward_state = np.linalg.norm(self.state_space.high)**2 - np.linalg.norm(self.state)**2
+        # reward_state = 0.5 * reward_state / (np.linalg.norm(self.state_space.high)**2)
+        # reward_control = np.linalg.norm(self.action_space.high)**2 - np.linalg.norm(u)**2
+        # reward_control = 0.5 * reward_control / (np.linalg.norm(self.action_space.high)**2)
+        # reward = reward_state + reward_control
+        # print(
+        #     f"State norm: {np.linalg.norm(self.state)}, control norm: {np.linalg.norm(u)}, reward state: {reward_state}, reward control: {reward_control}"
+        # )
         # reward = reward_control
 
         terminated = False
@@ -233,7 +242,7 @@ class FlexibleArmEnv(gym.Env):
     def get_params(self):
         return self.design_model
 
-    def _build_flex_model(self, observation, disturbance_model, supply_rate):
+    def _build_true_model(self, observation, design_model, disturbance_model, supply_rate):
         nx = 4  # Plant state size
         nw = 1  # Output size of uncertainty Deltap
         nd = None  # Disturbance size. Defined based on disturbance model.
@@ -251,12 +260,12 @@ class FlexibleArmEnv(gym.Env):
         K = np.array([[0, 0], [0, 4 * self.EI / (self.L**3)]], dtype=np.float32)
         B = np.diag([0, self.flexdamp]).astype(np.float32)
 
-        Ap = np.bmat(
-            [
+        # fmt: off
+        Ap = np.bmat([
                 [np.zeros((2, 2)), np.eye(2)],
                 [-np.linalg.solve(M, K), -np.linalg.solve(M, B)],
-            ]
-        )
+        ])
+        # fmt: on
         Ap = np.asarray(Ap).astype(np.float32)
         Bpw = np.zeros((nx, nw), dtype=np.float32)
         Bpu = np.vstack([np.zeros((2, 1)), np.linalg.solve(M, np.array([[1], [0]]))])
@@ -266,10 +275,21 @@ class FlexibleArmEnv(gym.Env):
         Dpvw = np.zeros((nv, nw), dtype=np.float32)
         Dpvu = np.zeros((nv, nu), dtype=np.float32)
 
-        if observation == "full":  # Observe full state
+        assert design_model in ["flexible", "rigid"]
+        if observation == "full" and design_model == "flexible":
+            # Observe full state
             ny = nx
             Cpy = np.eye(nx, dtype=np.float32)
-        elif observation == "partial":  # Observe sum of x and h
+        elif observation == "full" and design_model == "rigid":
+            # Observe "full state" of rigid model, with sensors at top of pendulum (gives x + h, xdot + hdot)
+            ny = 2
+            Cpy = np.array([[1, 1, 0, 0], [0, 0, 1, 1]], dtype=np.float32)
+        elif observation == "partial" and design_model == "flexible":
+            # Observe x and h
+            ny = 2
+            Cpy = np.array([[1, 0, 0, 0], [0, 1, 0, 0]], dtype=np.float32)
+        elif observation == "partial" and design_model == "rigid":
+            # Observe x + h
             ny = 1
             Cpy = np.array([[1, 1, 0, 0]], dtype=np.float32)
         else:
@@ -325,7 +345,7 @@ class FlexibleArmEnv(gym.Env):
         )
         # fmt: on
 
-    def _build_rigid_model(self, observation, disturbance_model, supply_rate):
+    def _build_design_model(self, observation, disturbance_model, supply_rate):
         nx = 2
         nw = 1  # Output size of uncertainty Deltap
         nd = None  # Disturbance size. Defined based on disturbance_model.

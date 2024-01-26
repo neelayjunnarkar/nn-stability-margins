@@ -11,9 +11,6 @@ class InvertedPendulumEnv(gym.Env):
     """
 
     def __init__(self, env_config):
-        assert "factor" in env_config
-        factor = env_config["factor"]
-
         assert "observation" in env_config
         observation = env_config["observation"]
 
@@ -23,8 +20,6 @@ class InvertedPendulumEnv(gym.Env):
         assert "disturbance_model" in env_config
         self.disturbance_model = env_config["disturbance_model"]
 
-        self.factor = factor
-        self.viewer = None
         self.g = 9.8  # gravity (m/s^2)
         self.m = 0.15  # mass (Kg)
         self.l = 0.5  # length of pendulum (m)
@@ -202,7 +197,6 @@ class InvertedPendulumEnv(gym.Env):
 
     def step(self, u, fail_on_state_space=True, fail_on_time_limit=True):
         u = np.clip(u, -self.max_torque, self.max_torque)
-        # u *= self.factor
 
         if self.disturbance_model == "none":
             d = np.zeros((self.nd,), dtype=np.float32)

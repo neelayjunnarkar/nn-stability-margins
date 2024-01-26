@@ -11,6 +11,7 @@ from thetahat_dissipativity import LTIProjector as LTIThetahatProjector
 from utils import build_mlp, from_numpy, to_numpy
 from variable_structs import ControllerLTIThetaParameters
 
+
 class LTIModel(RecurrentNetwork, nn.Module):
     """
     An LTI system of the following form:
@@ -191,11 +192,7 @@ class LTIModel(RecurrentNetwork, nn.Module):
         )
         assert unexpected == [], f"Loading unexpected key after projection: {unexpected}"
         # fmt: off
-        assert missing == [
-            "log_stds", "value.0.bias", "value.0.weight_g", "value.0.weight_v",
-            "value.2.bias", "value.2.weight_g", "value.2.weight_v",
-            "value.4.bias", "value.4.weight_g", "value.4.weight_v",
-        ], missing
+        assert missing ==  ['log_stds', 'value.0.weight', 'value.0.bias', 'value.2.weight', 'value.2.bias', 'value.4.weight', 'value.4.bias'], missing
         # fmt: on
 
     @override(ModelV2)

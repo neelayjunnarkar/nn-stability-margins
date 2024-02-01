@@ -99,7 +99,7 @@ def construct_dissipativity_matrix(
     ])
     # fmt: on
 
-    Dew = stacker([[P.Dpew + P.Dpeu @ K.NA22 @ P.Dpyw, P.Dpew @ K.Dkuw]])
+    Dew = stacker([[P.Dpew + P.Dpeu @ K.NA22 @ P.Dpyw, P.Dpeu @ K.Dkuw]])
 
     Ded = P.Dped + P.Dpeu @ K.NA22 @ P.Dpyd
 
@@ -262,6 +262,9 @@ class Projector:
                 [self.vThetahat.R, self.vtrs * np.eye(self.vThetahat.R.shape[0])],
                 [self.vtrs * np.eye(self.vThetahat.S.shape[0]), self.vThetahat.S],
             ]) >> self.eps * np.eye(self.vThetahat.R.shape[0] + self.vThetahat.S.shape[0]),
+            # Well-posedness condition Lambda Dkvw + Dkvw^T Lambda - 2 Lambda < 0
+            self.vThetahat.Dkvwhat + self.vThetahat.Dkvwhat.T - 2*self.vThetahat.Lambda << -self.eps * np.eye(self.vThetahat.Lambda.shape[0]),
+            # Dissipativity condition
             mat << 0,
         ]
         if self.trs_mode == "variable":
@@ -297,7 +300,7 @@ class Projector:
             cp.sum_squares(self.vThetahat.Dkvwhat),
         ])
         # fmt: on
-        objective = cost_projection_error + cost_ill_conditioning # + cost_size
+        objective = cost_projection_error + cost_ill_conditioning  # + cost_size
 
         self.problem = cp.Problem(cp.Minimize(objective), constraints)
 
@@ -364,13 +367,18 @@ class Projector:
 
         # Check [R, I; I, S] is positive definite.
         # fmt: off
-        mat = np.asarray(np.bmat([
+        riis = np.asarray(np.bmat([
             [controller_params.R, np.eye(controller_params.R.shape[0])],
             [np.eye(controller_params.R.shape[0]), controller_params.S]
         ]))
         # fmt: on
-        if not is_positive_definite(mat):
+        if not is_positive_definite(riis):
             print("[R, I; I, S] is not PD.")
+            return False
+        
+        # Check well-posedness condition
+        if not is_positive_definite(2*controller_params.Lambda - controller_params.Dkvwhat - controller_params.Dkvwhat.T):
+            print("Not well-posed.")
             return False
 
         # Check main dissipativity condition.
@@ -381,7 +389,7 @@ class Projector:
             controller_params=controller_params,
             stacker="numpy",
         )
-        # Check condition mat <= 0
+        # Check dissipativity condition mat <= 0
         return is_positive_semidefinite(-mat)
 
 
@@ -500,7 +508,7 @@ class LTIProjector:
             cp.sum_squares(self.vThetahat.NA22),
         ])
         # fmt: on
-        objective = cost_projection_error + cost_ill_conditioning # + cost_size
+        objective = cost_projection_error + cost_ill_conditioning  # + cost_size
 
         self.problem = cp.Problem(cp.Minimize(objective), constraints)
 

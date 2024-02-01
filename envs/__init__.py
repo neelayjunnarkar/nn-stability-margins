@@ -12,6 +12,7 @@ This folder contains plant models.
 # from envs.vehicle import VehicleLateralEnv
 
 from envs.inverted_pendulum import InvertedPendulumEnv
+from envs.time_delay_inverted_pendulum import TimeDelayInvertedPendulumEnv
 from envs.flex_arm import FlexibleArmEnv
 
 env_map = {

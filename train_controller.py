@@ -36,32 +36,32 @@ if use_savio:
     JOB_ID = os.getenv('SLURM_JOB_ID')
 else:
     # N_CPUS = 1  # test
-    N_CPUS = multiprocessing.cpu_count() / 2
+    N_CPUS = multiprocessing.cpu_count() 
 n_tasks = 1
 n_workers_per_task = int(math.floor(N_CPUS / n_tasks)) - 1 - 1
 
 # Same dt must be used in RNN and RINN and DissipativeRINN
-# dt = 0.01
-# env = InvertedPendulumEnv
-# env_config = {
-#     "observation": "partial",
-#     "normed": True,
-#     "dt": dt,
-#     "supply_rate": "stability",
-#     "disturbance_model": "occasional"
-# }
-dt = 0.001 # 0.0001
-env = FlexibleArmEnv
+dt = 0.01
+env = InvertedPendulumEnv
 env_config = {
-    "observation": "full",
+    "observation": "partial",
     "normed": True,
     "dt": dt,
-    "rollout_length": int(2.5/dt)-1, # 10000,
-    "supply_rate": "l2_gain",
-    "disturbance_model": "none",
-    "disturbance_design_model": "occasional",
-    "design_model": "rigid",
+    "supply_rate": "stability",
+    "disturbance_model": "occasional"
 }
+# dt = 0.001 # 0.0001
+# env = FlexibleArmEnv
+# env_config = {
+#     "observation": "full",
+#     "normed": True,
+#     "dt": dt,
+#     "rollout_length": int(2.5/dt)-1, # 10000,
+#     "supply_rate": "l2_gain",
+#     "disturbance_model": "none",
+#     "disturbance_design_model": "occasional",
+#     "design_model": "rigid",
+# }
 
 # Configure the algorithm.
 config = {
@@ -95,16 +95,16 @@ config = {
         #     # "min_trs": 1.73, 
         #     "min_trs": 3.33 # 1.44,
         # }
-        "custom_model": RINN,
-        "custom_model_config": {
-            "state_size": 2,
-            "nonlin_size": 16,
-            "log_std_init": np.log(1.0),
-            "dt": dt,
-            "plant": env,
-            "plant_config": env_config,
-            "eps": 1e-3,
-        }
+        # "custom_model": RINN,
+        # "custom_model_config": {
+        #     "state_size": 2,
+        #     "nonlin_size": 16,
+        #     "log_std_init": np.log(1.0),
+        #     "dt": dt,
+        #     "plant": env,
+        #     "plant_config": env_config,
+        #     "eps": 1e-3,
+        # }
         # "custom_model": DissipativeThetaRINN,
         # "custom_model_config": {
         #     "state_size": 2,
@@ -128,14 +128,14 @@ config = {
 #             "plant": env,
 #             "plant_config": env_config,
 #             "eps": 1e-3,
-#             # "mode": "simple",
-#             "mode": "thetahat",
-#             "trs_mode": "fixed",
-#             "min_trs": 1.5, # 1.73,
-# #             "P": np.array([[ 1.04159083e+02, -6.56387889e-01,  1.15737991e+01, -1.09562663e-02],
-# #  [-6.56387889e-01,  2.00579719e-02, -1.73840137e-01, -7.29584950e-01],
-# #  [ 1.15737991e+01, -1.73840137e-01,  2.42446125e+00,  8.20153731e+00],
-# #  [-1.09562663e-02, -7.29584950e-01,  8.20153731e+00,  6.03135330e+01]]),
+#             "mode": "simple",
+#             # "mode": "thetahat",
+#             # "trs_mode": "fixed",
+#             # "min_trs": 1.5, # 1.73,
+#             "P": np.array([[ 1.04159083e+02, -6.56387889e-01,  1.15737991e+01, -1.09562663e-02],
+#  [-6.56387889e-01,  2.00579719e-02, -1.73840137e-01, -7.29584950e-01],
+#  [ 1.15737991e+01, -1.73840137e-01,  2.42446125e+00,  8.20153731e+00],
+#  [-1.09562663e-02, -7.29584950e-01,  8.20153731e+00,  6.03135330e+01]]),
 #             # "lti_initializer": "dissipative_theta",
 #             # "lti_initializer_kwargs": {
 #             #     "eps": 1e-3,
@@ -154,27 +154,27 @@ config = {
 #             #     "min_trs": 1.5, # 1.44
 #             # }
 #         }
-        # "custom_model": LTIModel,
-        # "custom_model_config": {
-        #     "dt": dt,
-        #     "plant": env,
-        #     "plant_config": env_config,
-        #     "learn": True,
-        #     "log_std_init": np.log(1.0),
-        #     "state_size": 2,
-        #     "trs_mode": "fixed",
-        #     "min_trs": 1.5, # 1.44,
-        #     "lti_controller": "dissipative_thetahat",
-        #     "lti_controller_kwargs": {
-        #         "trs_mode": "fixed",
-        #         "min_trs": 1.5 # 1.44
-        #     },
-        #     # "lti_controller": "lqr",
-        #     # "lti_controller_kwargs": {
-        #     #     "Q": np.eye(2, dtype=np.float32),
-        #     #     "R": np.array([[1]], dtype=np.float32)
-        #     # },
-        # }
+        "custom_model": LTIModel,
+        "custom_model_config": {
+            "dt": dt,
+            "plant": env,
+            "plant_config": env_config,
+            "learn": True,
+            "log_std_init": np.log(1.0),
+            "state_size": 2,
+            "trs_mode": "fixed",
+            "min_trs": 1.5, # 1.44,
+            "lti_controller": "dissipative_thetahat",
+            "lti_controller_kwargs": {
+                "trs_mode": "fixed",
+                "min_trs": 1.5 # 1.44
+            },
+            # "lti_controller": "lqr",
+            # "lti_controller_kwargs": {
+            #     "Q": np.eye(2, dtype=np.float32),
+            #     "R": np.array([[0.01]], dtype=np.float32)
+            # },
+        }
     },
     "lr": 1e-3,
     "num_workers": n_workers_per_task,
@@ -216,11 +216,11 @@ results = tune.run(
     ProjectedPPOTrainer,
     config=config,
     stop={
-        "agent_timesteps_total": 6100e3,
+        "agent_timesteps_total": 100e3,
     },
     verbose=1,
     trial_name_creator=name_creator,
-    name="scratch", # "FlexArm_Partial_L2_None_Occas_Rigid",
+    name="scratch",
     local_dir="ray_results",
     checkpoint_at_end=True,
     checkpoint_freq=1000,

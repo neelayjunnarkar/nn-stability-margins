@@ -35,7 +35,6 @@ def lqr(
         K, S, E = ct.lqr(Ap, Bpu, Q, R)
     else:
         K, S, E = ct.lqr(Ap, Bpu, Q, R, N)
-    print(K)
 
     # Construct LTI controller
     nx = state_size

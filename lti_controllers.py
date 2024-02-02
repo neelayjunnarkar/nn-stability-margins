@@ -11,8 +11,6 @@ from variable_structs import (
     PlantParameters,
 )
 
-# TODO(Neelay) Standardize inputs to these functions
-
 
 def lqr(
     plant_params: PlantParameters,
@@ -104,6 +102,7 @@ def dissipative_thetahat(
     input_size=None,
     trs_mode="fixed",
     min_trs=1.0,
+    backoff_factor=1.1,
     **kwargs,
 ):
     """Synthesize dissipative LTI controller using convex condition."""
@@ -112,7 +111,14 @@ def dissipative_thetahat(
     assert input_size is not None
 
     projector = ThetahatLTIProjector(
-        plant_params, eps, output_size, state_size, input_size, trs_mode, min_trs
+        plant_params,
+        eps,
+        output_size,
+        state_size,
+        input_size,
+        trs_mode,
+        min_trs,
+        backoff_factor=backoff_factor,
     )
 
     # Construct thetahat0 as thetahat when theta=0 and P=I

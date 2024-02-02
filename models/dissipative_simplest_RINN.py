@@ -44,9 +44,17 @@ class DissipativeSimplestRINN(RecurrentNetwork, nn.Module):
     #   dt
     #   baseline_n_layers: 2
     #   baseline_size: 64
+    #   eps: 1e-6
     #   plant
     #   plant_config
-    #   eps: 1e-6
+    #   P: If LTI initializer used, then uses result from LTI init. Else, identity.
+    #   Lambda: If LTI initializer used, then 0, else identity.
+    #   lti_initializer: None
+    #   lti_initializer_kwargs: Empty dictionary.
+    #   trs_mode: fixed
+    #   min_trs:  1.0
+    #   backoff_factor: 1.1
+    #   mode: simplest    
     def __init__(
         self,
         obs_space,
@@ -193,8 +201,9 @@ class DissipativeSimplestRINN(RecurrentNetwork, nn.Module):
             input_size=self.input_size,
         )
 
-        trs_mode = model_config["trs_mode"] if "trs_mode" in model_config else "variable"
+        trs_mode = model_config["trs_mode"] if "trs_mode" in model_config else "fixed"
         min_trs = model_config["min_trs"] if "min_trs" in model_config else 1.0
+        backoff_factor = model_config["backoff_factor"] if "backoff_factor" in model_config else 1.1
 
         self.thetahat_projector = ThetahatProjector(
             np_plant_params,
@@ -205,6 +214,7 @@ class DissipativeSimplestRINN(RecurrentNetwork, nn.Module):
             input_size=self.input_size,
             trs_mode=trs_mode,
             min_trs=min_trs,
+            backoff_factor=backoff_factor
         )
 
         self.mode = model_config["mode"] if "mode" in model_config else "simplest"

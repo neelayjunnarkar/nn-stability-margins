@@ -181,6 +181,7 @@ class Projector:
         # Parameters for tuning condition number of I - RS,
         trs_mode,  # Either "fixed" or "variable"
         min_trs,  # Used as the trs value when trs_mode="fixed"
+        backoff_factor=1.1,  # Multiplier for bound on suboptimality
     ):
         self.plant_params = plant_params
         self.eps = eps
@@ -190,6 +191,8 @@ class Projector:
         self.input_size = input_size
         self.trs_mode = trs_mode
         self.min_trs = min_trs
+        assert self.trs_mode == "fixed", "trs_mode variable deprecated"
+        self.backoff_factor = backoff_factor
 
         assert is_positive_semidefinite(plant_params.MDeltapvv)
         Dm, Vm = np.linalg.eigh(plant_params.MDeltapvv)
@@ -200,10 +203,11 @@ class Projector:
         self.LX = np.diag(np.sqrt(Dx)) @ Vx.T
 
         self._construct_projection_problem()
+        self._construct_backoff_problem()
 
     def _construct_projection_problem(self):
         # Parameters: This is the thetahat to be projected into the stabilizing set.
-        self.pThetahat = ControllerThetahatParameters(
+        self.proj_pThetahat = ControllerThetahatParameters(
             S=cp.Parameter((self.state_size, self.state_size), PSD=True),
             R=cp.Parameter((self.state_size, self.state_size), PSD=True),
             NA11=cp.Parameter((self.state_size, self.state_size)),
@@ -219,7 +223,7 @@ class Projector:
         )
 
         # Variables: This will be the solution of the projection.
-        self.vThetahat = ControllerThetahatParameters(
+        self.proj_vThetahat = ControllerThetahatParameters(
             S=cp.Variable((self.state_size, self.state_size), PSD=True),
             R=cp.Variable((self.state_size, self.state_size), PSD=True),
             NA11=cp.Variable((self.state_size, self.state_size)),
@@ -238,7 +242,7 @@ class Projector:
             plant_params=self.plant_params,
             LDeltap=self.LDeltap,
             LX=self.LX,
-            controller_params=self.vThetahat,
+            controller_params=self.proj_vThetahat,
             stacker="cvxpy",
         )
 
@@ -254,75 +258,159 @@ class Projector:
 
         # fmt: off
         constraints = [
-            # self.vtrs >= self.min_trs,
-            self.vThetahat.S >> self.eps * np.eye(self.vThetahat.S.shape[0]),
-            self.vThetahat.R >> self.eps * np.eye(self.vThetahat.R.shape[0]),
-            self.vThetahat.Lambda >> self.eps * np.eye(self.vThetahat.Lambda.shape[0]),
+            self.proj_vThetahat.S >> self.eps * np.eye(self.proj_vThetahat.S.shape[0]),
+            self.proj_vThetahat.R >> self.eps * np.eye(self.proj_vThetahat.R.shape[0]),
+            self.proj_vThetahat.Lambda >> self.eps * np.eye(self.proj_vThetahat.Lambda.shape[0]),
             cp.bmat([
-                [self.vThetahat.R, self.vtrs * np.eye(self.vThetahat.R.shape[0])],
-                [self.vtrs * np.eye(self.vThetahat.S.shape[0]), self.vThetahat.S],
-            ]) >> self.eps * np.eye(self.vThetahat.R.shape[0] + self.vThetahat.S.shape[0]),
+                [self.proj_vThetahat.R, self.vtrs * np.eye(self.proj_vThetahat.R.shape[0])],
+                [self.vtrs * np.eye(self.proj_vThetahat.S.shape[0]), self.proj_vThetahat.S],
+            ]) >> self.eps * np.eye(self.proj_vThetahat.R.shape[0] + self.proj_vThetahat.S.shape[0]),
             # Well-posedness condition Lambda Dkvw + Dkvw^T Lambda - 2 Lambda < 0
-            self.vThetahat.Dkvwhat + self.vThetahat.Dkvwhat.T - 2*self.vThetahat.Lambda << -self.eps * np.eye(self.vThetahat.Lambda.shape[0]),
+            self.proj_vThetahat.Dkvwhat + self.proj_vThetahat.Dkvwhat.T - 2*self.proj_vThetahat.Lambda << -self.eps * np.eye(self.proj_vThetahat.Lambda.shape[0]),
             # Dissipativity condition
             mat << 0,
         ]
         if self.trs_mode == "variable":
             constraints.append(self.vtrs >= self.min_trs)
 
-
         cost_projection_error = sum([
-            cp.sum_squares(self.pThetahat.Dkuw - self.vThetahat.Dkuw),
-            cp.sum_squares(self.pThetahat.S - self.vThetahat.S),
-            cp.sum_squares(self.pThetahat.R - self.vThetahat.R),
-            cp.sum_squares(self.pThetahat.Lambda - self.vThetahat.Lambda),
-            cp.sum_squares(self.pThetahat.NA11 - self.vThetahat.NA11),
-            cp.sum_squares(self.pThetahat.NA12 - self.vThetahat.NA12),
-            cp.sum_squares(self.pThetahat.NA21 - self.vThetahat.NA21),
-            cp.sum_squares(self.pThetahat.NA22 - self.vThetahat.NA22),
-            cp.sum_squares(self.pThetahat.NB - self.vThetahat.NB),
-            cp.sum_squares(self.pThetahat.NC - self.vThetahat.NC),
-            cp.sum_squares(self.pThetahat.Dkvyhat - self.vThetahat.Dkvyhat),
-            cp.sum_squares(self.pThetahat.Dkvwhat - self.vThetahat.Dkvwhat),
+            cp.sum_squares(self.proj_pThetahat.Dkuw - self.proj_vThetahat.Dkuw),
+            cp.sum_squares(self.proj_pThetahat.S - self.proj_vThetahat.S),
+            cp.sum_squares(self.proj_pThetahat.R - self.proj_vThetahat.R),
+            cp.sum_squares(self.proj_pThetahat.Lambda - self.proj_vThetahat.Lambda),
+            cp.sum_squares(self.proj_pThetahat.NA11 - self.proj_vThetahat.NA11),
+            cp.sum_squares(self.proj_pThetahat.NA12 - self.proj_vThetahat.NA12),
+            cp.sum_squares(self.proj_pThetahat.NA21 - self.proj_vThetahat.NA21),
+            cp.sum_squares(self.proj_pThetahat.NA22 - self.proj_vThetahat.NA22),
+            cp.sum_squares(self.proj_pThetahat.NB - self.proj_vThetahat.NB),
+            cp.sum_squares(self.proj_pThetahat.NC - self.proj_vThetahat.NC),
+            cp.sum_squares(self.proj_pThetahat.Dkvyhat - self.proj_vThetahat.Dkvyhat),
+            cp.sum_squares(self.proj_pThetahat.Dkvwhat - self.proj_vThetahat.Dkvwhat),
         ])
-        cost_size = sum([
-            cp.sum_squares(self.vThetahat.Dkuw),
-            cp.sum_squares(self.vThetahat.S),
-            cp.sum_squares(self.vThetahat.R),
-            cp.sum_squares(self.vThetahat.Lambda),
-            cp.sum_squares(self.vThetahat.NA11),
-            cp.sum_squares(self.vThetahat.NA12),
-            cp.sum_squares(self.vThetahat.NA21),
-            cp.sum_squares(self.vThetahat.NA22),
-            cp.sum_squares(self.vThetahat.NB),
-            cp.sum_squares(self.vThetahat.NC),
-            cp.sum_squares(self.vThetahat.Dkvyhat),
-            cp.sum_squares(self.vThetahat.Dkvwhat),
+        # cost_size = sum([
+        #     cp.sum_squares(self.proj_vThetahat.Dkuw),
+        #     cp.sum_squares(self.proj_vThetahat.S),
+        #     cp.sum_squares(self.proj_vThetahat.R),
+        #     cp.sum_squares(self.proj_vThetahat.Lambda),
+        #     cp.sum_squares(self.proj_vThetahat.NA11),
+        #     cp.sum_squares(self.proj_vThetahat.NA12),
+        #     cp.sum_squares(self.proj_vThetahat.NA21),
+        #     cp.sum_squares(self.proj_vThetahat.NA22),
+        #     cp.sum_squares(self.proj_vThetahat.NB),
+        #     cp.sum_squares(self.proj_vThetahat.NC),
+        #     cp.sum_squares(self.proj_vThetahat.Dkvyhat),
+        #     cp.sum_squares(self.proj_vThetahat.Dkvwhat),
+        # ])
+        # fmt: on
+        # Must be only projection error for the backoff step
+        # + cost_ill_conditioning  # + cost_size
+        objective = cost_projection_error
+
+        self.proj_problem = cp.Problem(cp.Minimize(objective), constraints)
+
+    def _construct_backoff_problem(self):
+        # Parameters: This is the thetahat to be projected into the stabilizing set.
+        self.backoff_pThetahat = ControllerThetahatParameters(
+            S=cp.Parameter((self.state_size, self.state_size), PSD=True),
+            R=cp.Parameter((self.state_size, self.state_size), PSD=True),
+            NA11=cp.Parameter((self.state_size, self.state_size)),
+            NA12=cp.Parameter((self.state_size, self.input_size)),
+            NA21=cp.Parameter((self.output_size, self.state_size)),
+            NA22=cp.Parameter((self.output_size, self.input_size)),
+            NB=cp.Parameter((self.state_size, self.nonlin_size)),
+            NC=cp.Parameter((self.nonlin_size, self.state_size)),
+            Dkuw=cp.Parameter((self.output_size, self.nonlin_size)),
+            Dkvyhat=cp.Parameter((self.nonlin_size, self.input_size)),
+            Dkvwhat=cp.Parameter((self.nonlin_size, self.nonlin_size)),
+            Lambda=cp.Parameter((self.nonlin_size, self.nonlin_size), diag=True),
+        )
+        # Squared projection error
+        self.backoff_optimal_projection_error = cp.Parameter(nonneg=True)
+
+        # Variables: This will be the solution of the projection.
+        self.backoff_vThetahat = ControllerThetahatParameters(
+            S=cp.Variable((self.state_size, self.state_size), PSD=True),
+            R=cp.Variable((self.state_size, self.state_size), PSD=True),
+            NA11=cp.Variable((self.state_size, self.state_size)),
+            NA12=cp.Variable((self.state_size, self.input_size)),
+            NA21=cp.Variable((self.output_size, self.state_size)),
+            NA22=cp.Variable((self.output_size, self.input_size)),
+            NB=cp.Variable((self.state_size, self.nonlin_size)),
+            NC=cp.Variable((self.nonlin_size, self.state_size)),
+            Dkuw=cp.Variable((self.output_size, self.nonlin_size)),
+            Dkvyhat=cp.Variable((self.nonlin_size, self.input_size)),
+            Dkvwhat=cp.Variable((self.nonlin_size, self.nonlin_size)),
+            Lambda=cp.Variable((self.nonlin_size, self.nonlin_size), diag=True),
+        )
+        self.backoff_veps = cp.Variable(pos=True)
+
+        mat = construct_dissipativity_matrix(
+            plant_params=self.plant_params,
+            LDeltap=self.LDeltap,
+            LX=self.LX,
+            controller_params=self.backoff_vThetahat,
+            stacker="cvxpy",
+        )
+
+        # fmt: off
+        cost_projection_error = sum([
+            cp.sum_squares(self.backoff_pThetahat.Dkuw    - self.backoff_vThetahat.Dkuw),
+            cp.sum_squares(self.backoff_pThetahat.S       - self.backoff_vThetahat.S),
+            cp.sum_squares(self.backoff_pThetahat.R       - self.backoff_vThetahat.R),
+            cp.sum_squares(self.backoff_pThetahat.Lambda  - self.backoff_vThetahat.Lambda),
+            cp.sum_squares(self.backoff_pThetahat.NA11    - self.backoff_vThetahat.NA11),
+            cp.sum_squares(self.backoff_pThetahat.NA12    - self.backoff_vThetahat.NA12),
+            cp.sum_squares(self.backoff_pThetahat.NA21    - self.backoff_vThetahat.NA21),
+            cp.sum_squares(self.backoff_pThetahat.NA22    - self.backoff_vThetahat.NA22),
+            cp.sum_squares(self.backoff_pThetahat.NB      - self.backoff_vThetahat.NB),
+            cp.sum_squares(self.backoff_pThetahat.NC      - self.backoff_vThetahat.NC),
+            cp.sum_squares(self.backoff_pThetahat.Dkvyhat - self.backoff_vThetahat.Dkvyhat),
+            cp.sum_squares(self.backoff_pThetahat.Dkvwhat - self.backoff_vThetahat.Dkvwhat),
         ])
         # fmt: on
-        objective = cost_projection_error + cost_ill_conditioning  # + cost_size
 
-        self.problem = cp.Problem(cp.Minimize(objective), constraints)
+        # fmt: off
+        constraints = [
+            self.backoff_vThetahat.S >> self.eps * np.eye(self.backoff_vThetahat.S.shape[0]),
+            self.backoff_vThetahat.R >> self.eps * np.eye(self.backoff_vThetahat.R.shape[0]),
+            self.backoff_vThetahat.Lambda >> self.eps * np.eye(self.backoff_vThetahat.Lambda.shape[0]),
+            cp.bmat([
+                [self.backoff_vThetahat.R, np.eye(self.backoff_vThetahat.R.shape[0])],
+                [np.eye(self.backoff_vThetahat.S.shape[0]), self.backoff_vThetahat.S],
+            ]) >> self.backoff_veps * np.eye(self.backoff_vThetahat.R.shape[0] + self.backoff_vThetahat.S.shape[0]),
+            # Well-posedness condition Lambda Dkvw + Dkvw^T Lambda - 2 Lambda < 0
+            self.backoff_vThetahat.Dkvwhat + self.backoff_vThetahat.Dkvwhat.T - 2*self.backoff_vThetahat.Lambda << -self.eps * np.eye(self.backoff_vThetahat.Lambda.shape[0]),
+            # Dissipativity condition
+            mat << 0,
+            # Backoff
+            cost_projection_error <= self.backoff_factor**2 * self.backoff_optimal_projection_error
+        ]
+        # fmt: on
 
-    def project(self, controller_params: ControllerThetahatParameters, solver=cp.MOSEK, **kwargs):
+        objective = self.backoff_veps
+        self.backoff_problem = cp.Problem(cp.Maximize(objective), constraints)
+
+    def base_project(
+        self, controller_params: ControllerThetahatParameters, solver=cp.MOSEK, **kwargs
+    ):
         """Projects input variables to set corresponding to dissipative controllers."""
         K = controller_params
-        self.pThetahat.Dkuw.value = K.Dkuw
-        self.pThetahat.S.value = K.S
-        self.pThetahat.R.value = K.R
-        self.pThetahat.Lambda.value = K.Lambda
-        self.pThetahat.NA11.value = K.NA11
-        self.pThetahat.NA12.value = K.NA12
-        self.pThetahat.NA21.value = K.NA21
-        self.pThetahat.NA22.value = K.NA22
-        self.pThetahat.NB.value = K.NB
-        self.pThetahat.NC.value = K.NC
-        self.pThetahat.Dkvyhat.value = K.Dkvyhat
-        self.pThetahat.Dkvwhat.value = K.Dkvwhat
+        self.proj_pThetahat.Dkuw.value = K.Dkuw
+        self.proj_pThetahat.S.value = K.S
+        self.proj_pThetahat.R.value = K.R
+        self.proj_pThetahat.Lambda.value = K.Lambda
+        self.proj_pThetahat.NA11.value = K.NA11
+        self.proj_pThetahat.NA12.value = K.NA12
+        self.proj_pThetahat.NA21.value = K.NA21
+        self.proj_pThetahat.NA22.value = K.NA22
+        self.proj_pThetahat.NB.value = K.NB
+        self.proj_pThetahat.NC.value = K.NC
+        self.proj_pThetahat.Dkvyhat.value = K.Dkvyhat
+        self.proj_pThetahat.Dkvwhat.value = K.Dkvwhat
 
         try:
             # t0 = time.perf_counter()
-            self.problem.solve(enforce_dpp=True, solver=solver, **kwargs)
+            self.proj_problem.solve(enforce_dpp=True, solver=solver, **kwargs)
             # t1 = time.perf_counter()
             # print(f"Projection solving took {t1-t0} seconds.")
         except Exception as e:
@@ -335,19 +423,91 @@ class Projector:
             cp.OPTIMAL_INACCURATE,
             cp.UNBOUNDED_INACCURATE,
         ]
-        if self.problem.status not in feas_stats:
-            print(f"Failed to solve with status {self.problem.status}")
+        if self.proj_problem.status not in feas_stats:
+            print(f"Failed to solve with status {self.proj_problem.status}")
             raise Exception()
-        # print(f"Projection objective: {self.problem.value}")
+        # print(f"Projection objective: {self.proj_problem.value}")
 
         # fmt: off
         new_controller_params = ControllerThetahatParameters(
-            self.vThetahat.S.value, self.vThetahat.R.value, self.vThetahat.NA11.value,
-            self.vThetahat.NA12.value, self.vThetahat.NA21.value, self.vThetahat.NA22.value,
-            self.vThetahat.NB.value, self.vThetahat.NC.value, self.vThetahat.Dkuw.value,
-            self.vThetahat.Dkvyhat.value, self.vThetahat.Dkvwhat.value, self.vThetahat.Lambda.value.toarray()
+            self.proj_vThetahat.S.value, self.proj_vThetahat.R.value, self.proj_vThetahat.NA11.value,
+            self.proj_vThetahat.NA12.value, self.proj_vThetahat.NA21.value, self.proj_vThetahat.NA22.value,
+            self.proj_vThetahat.NB.value, self.proj_vThetahat.NC.value, self.proj_vThetahat.Dkuw.value,
+            self.proj_vThetahat.Dkvyhat.value, self.proj_vThetahat.Dkvwhat.value, self.proj_vThetahat.Lambda.value.toarray()
         )
         # fmt: on
+        return new_controller_params, {"value": self.proj_problem.value}
+
+    def project(self, controller_params: ControllerThetahatParameters, solver=cp.MOSEK, **kwargs):
+        """Projects input variables to set corresponding to dissipative controllers, allowing some suboptimality to improve conditioning."""
+        # First solve projection to get optimal projection error
+        _, info = self.base_project(controller_params, solver=solver, **kwargs)
+        self.backoff_optimal_projection_error.value = info["value"]
+
+        # Then solve backoff problem which allows some suboptimality in projection,
+        # but should improve conditioning of thetahat->theta reconstruction.
+        K = controller_params
+        self.backoff_pThetahat.Dkuw.value = K.Dkuw
+        self.backoff_pThetahat.S.value = K.S
+        self.backoff_pThetahat.R.value = K.R
+        self.backoff_pThetahat.Lambda.value = K.Lambda
+        self.backoff_pThetahat.NA11.value = K.NA11
+        self.backoff_pThetahat.NA12.value = K.NA12
+        self.backoff_pThetahat.NA21.value = K.NA21
+        self.backoff_pThetahat.NA22.value = K.NA22
+        self.backoff_pThetahat.NB.value = K.NB
+        self.backoff_pThetahat.NC.value = K.NC
+        self.backoff_pThetahat.Dkvyhat.value = K.Dkvyhat
+        self.backoff_pThetahat.Dkvwhat.value = K.Dkvwhat
+
+        try:
+            # t0 = time.perf_counter()
+            self.backoff_problem.solve(enforce_dpp=True, solver=solver, **kwargs)
+            # t1 = time.perf_counter()
+            # print(f"Backoff solving took {t1-t0} seconds.")
+        except Exception as e:
+            print(f"Failed to solve: {e}")
+            raise e
+
+        feas_stats = [
+            cp.OPTIMAL,
+            cp.UNBOUNDED,
+            cp.OPTIMAL_INACCURATE,
+            cp.UNBOUNDED_INACCURATE,
+        ]
+        if self.backoff_problem.status not in feas_stats:
+            print(f"Failed to solve with status {self.backoff_problem.status}")
+            raise Exception()
+
+        # fmt: off
+        new_controller_params = ControllerThetahatParameters(
+            self.backoff_vThetahat.S.value, self.backoff_vThetahat.R.value, self.backoff_vThetahat.NA11.value,
+            self.backoff_vThetahat.NA12.value, self.backoff_vThetahat.NA21.value, self.backoff_vThetahat.NA22.value,
+            self.backoff_vThetahat.NB.value, self.backoff_vThetahat.NC.value, self.backoff_vThetahat.Dkuw.value,
+            self.backoff_vThetahat.Dkvyhat.value, self.backoff_vThetahat.Dkvwhat.value, self.backoff_vThetahat.Lambda.value.toarray()
+        )
+        # fmt: on
+
+        # Testing
+        print(f"Backoff eps value: {self.backoff_veps.value}")
+        # fmt: off
+        cost_projection_error = np.sqrt(np.sum([
+            np.sum(np.square(controller_params.Dkuw    - new_controller_params.Dkuw)),
+            np.sum(np.square(controller_params.S       - new_controller_params.S)),
+            np.sum(np.square(controller_params.R       - new_controller_params.R)),
+            np.sum(np.square(controller_params.Lambda  - new_controller_params.Lambda)),
+            np.sum(np.square(controller_params.NA11    - new_controller_params.NA11)),
+            np.sum(np.square(controller_params.NA12    - new_controller_params.NA12)),
+            np.sum(np.square(controller_params.NA21    - new_controller_params.NA21)),
+            np.sum(np.square(controller_params.NA22    - new_controller_params.NA22)),
+            np.sum(np.square(controller_params.NB      - new_controller_params.NB)),
+            np.sum(np.square(controller_params.NC      - new_controller_params.NC)),
+            np.sum(np.square(controller_params.Dkvyhat - new_controller_params.Dkvyhat)),
+            np.sum(np.square(controller_params.Dkvwhat - new_controller_params.Dkvwhat)),
+        ]))
+        print(f"Projection error before vs after backoff: {np.sqrt(info['value'])} -> {cost_projection_error}")
+        # fmt: on
+
         return new_controller_params
 
     def is_dissipative(self, controller_params: ControllerThetahatParameters):
@@ -375,9 +535,11 @@ class Projector:
         if not is_positive_definite(riis):
             print("[R, I; I, S] is not PD.")
             return False
-        
+
         # Check well-posedness condition
-        if not is_positive_definite(2*controller_params.Lambda - controller_params.Dkvwhat - controller_params.Dkvwhat.T):
+        if not is_positive_definite(
+            2 * controller_params.Lambda - controller_params.Dkvwhat - controller_params.Dkvwhat.T
+        ):
             print("Not well-posed.")
             return False
 
@@ -406,6 +568,7 @@ class LTIProjector:
         # Parameters for tuning condition number of I - RS,
         trs_mode,  # Either "fixed" or "variable"
         min_trs,  # Used as the trs value when trs_mode="fixed"
+        backoff_factor=1.1,  # Multiplier for bound on suboptimality
     ):
         self.plant_params = plant_params
         self.eps = eps
@@ -414,6 +577,9 @@ class LTIProjector:
         self.input_size = input_size
         self.trs_mode = trs_mode
         self.min_trs = min_trs
+        assert self.trs_mode == "fixed", "trs_mode variable deprecated"
+        self.backoff_factor = backoff_factor
+
         self.nonlin_size = 1  # placeholder nonlin size used for creating zeros
 
         assert is_positive_semidefinite(plant_params.MDeltapvv)
@@ -425,10 +591,11 @@ class LTIProjector:
         self.LX = np.diag(np.sqrt(Dx)) @ Vx.T
 
         self._construct_projection_problem()
+        self._construct_backoff_problem()
 
     def _construct_projection_problem(self):
         # Parameters: This is the thetahat to be projected into the stabilizing set.
-        self.pThetahat = ControllerLTIThetahatParameters(
+        self.proj_pThetahat = ControllerLTIThetahatParameters(
             S=cp.Parameter((self.state_size, self.state_size), PSD=True),
             R=cp.Parameter((self.state_size, self.state_size), PSD=True),
             NA11=cp.Parameter((self.state_size, self.state_size)),
@@ -438,7 +605,7 @@ class LTIProjector:
         )
 
         # Variables: This will be the solution of the projection.
-        self.vThetahat = ControllerLTIThetahatParameters(
+        self.proj_vThetahat = ControllerLTIThetahatParameters(
             S=cp.Variable((self.state_size, self.state_size), PSD=True),
             R=cp.Variable((self.state_size, self.state_size), PSD=True),
             NA11=cp.Variable((self.state_size, self.state_size)),
@@ -448,12 +615,12 @@ class LTIProjector:
         )
 
         controller_params = ControllerThetahatParameters(
-            S=self.vThetahat.S,
-            R=self.vThetahat.R,
-            NA11=self.vThetahat.NA11,
-            NA12=self.vThetahat.NA12,
-            NA21=self.vThetahat.NA21,
-            NA22=self.vThetahat.NA22,
+            S=self.proj_vThetahat.S,
+            R=self.proj_vThetahat.R,
+            NA11=self.proj_vThetahat.NA11,
+            NA12=self.proj_vThetahat.NA12,
+            NA21=self.proj_vThetahat.NA21,
+            NA22=self.proj_vThetahat.NA22,
             NB=np.zeros((self.state_size, self.nonlin_size)),
             NC=np.zeros((self.nonlin_size, self.state_size)),
             Dkuw=np.zeros((self.output_size, self.nonlin_size)),
@@ -481,52 +648,124 @@ class LTIProjector:
 
         # fmt: off
         constraints = [
-            self.vtrs >= self.min_trs,
-            self.vThetahat.S >> self.eps * np.eye(self.vThetahat.S.shape[0]),
-            self.vThetahat.R >> self.eps * np.eye(self.vThetahat.R.shape[0]),
+            # self.vtrs >= self.min_trs,
+            self.proj_vThetahat.S >> self.eps * np.eye(self.proj_vThetahat.S.shape[0]),
+            self.proj_vThetahat.R >> self.eps * np.eye(self.proj_vThetahat.R.shape[0]),
             cp.bmat([
-                [self.vThetahat.R, self.vtrs * np.eye(self.vThetahat.R.shape[0])],
-                [self.vtrs * np.eye(self.vThetahat.S.shape[0]), self.vThetahat.S],
-            ]) >> self.eps * np.eye(self.vThetahat.R.shape[0] + self.vThetahat.S.shape[0]),
+                [self.proj_vThetahat.R, self.vtrs * np.eye(self.proj_vThetahat.R.shape[0])],
+                [self.vtrs * np.eye(self.proj_vThetahat.S.shape[0]), self.proj_vThetahat.S],
+            ]) >> self.eps * np.eye(self.proj_vThetahat.R.shape[0] + self.proj_vThetahat.S.shape[0]),
             mat << 0,
         ]
 
         cost_projection_error = sum([
-            cp.sum_squares(self.pThetahat.S - self.vThetahat.S),
-            cp.sum_squares(self.pThetahat.R - self.vThetahat.R),
-            cp.sum_squares(self.pThetahat.NA11 - self.vThetahat.NA11),
-            cp.sum_squares(self.pThetahat.NA12 - self.vThetahat.NA12),
-            cp.sum_squares(self.pThetahat.NA21 - self.vThetahat.NA21),
-            cp.sum_squares(self.pThetahat.NA22 - self.vThetahat.NA22),
+            cp.sum_squares(self.proj_pThetahat.S - self.proj_vThetahat.S),
+            cp.sum_squares(self.proj_pThetahat.R - self.proj_vThetahat.R),
+            cp.sum_squares(self.proj_pThetahat.NA11 - self.proj_vThetahat.NA11),
+            cp.sum_squares(self.proj_pThetahat.NA12 - self.proj_vThetahat.NA12),
+            cp.sum_squares(self.proj_pThetahat.NA21 - self.proj_vThetahat.NA21),
+            cp.sum_squares(self.proj_pThetahat.NA22 - self.proj_vThetahat.NA22),
         ])
-        cost_size = sum([
-            cp.sum_squares(self.vThetahat.S),
-            cp.sum_squares(self.vThetahat.R),
-            cp.sum_squares(self.vThetahat.NA11),
-            cp.sum_squares(self.vThetahat.NA12),
-            cp.sum_squares(self.vThetahat.NA21),
-            cp.sum_squares(self.vThetahat.NA22),
-        ])
+        # cost_size = sum([
+        #     cp.sum_squares(self.proj_vThetahat.S),
+        #     cp.sum_squares(self.proj_vThetahat.R),
+        #     cp.sum_squares(self.proj_vThetahat.NA11),
+        #     cp.sum_squares(self.proj_vThetahat.NA12),
+        #     cp.sum_squares(self.proj_vThetahat.NA21),
+        #     cp.sum_squares(self.proj_vThetahat.NA22),
+        # ])
         # fmt: on
-        objective = cost_projection_error + cost_ill_conditioning  # + cost_size
+        objective = cost_projection_error  # + cost_ill_conditioning  # + cost_size
 
-        self.problem = cp.Problem(cp.Minimize(objective), constraints)
+        self.proj_problem = cp.Problem(cp.Minimize(objective), constraints)
 
-    def project(
+    def _construct_backoff_problem(self):
+        # Parameters: This is the thetahat to be projected into the stabilizing set.
+        self.backoff_pThetahat = ControllerLTIThetahatParameters(
+            S=cp.Parameter((self.state_size, self.state_size), PSD=True),
+            R=cp.Parameter((self.state_size, self.state_size), PSD=True),
+            NA11=cp.Parameter((self.state_size, self.state_size)),
+            NA12=cp.Parameter((self.state_size, self.input_size)),
+            NA21=cp.Parameter((self.output_size, self.state_size)),
+            NA22=cp.Parameter((self.output_size, self.input_size)),
+        )
+        # Squared projection error
+        self.backoff_optimal_projection_error = cp.Parameter(nonneg=True)
+
+        # Variables: This will be the solution of the projection.
+        self.backoff_vThetahat = ControllerLTIThetahatParameters(
+            S=cp.Variable((self.state_size, self.state_size), PSD=True),
+            R=cp.Variable((self.state_size, self.state_size), PSD=True),
+            NA11=cp.Variable((self.state_size, self.state_size)),
+            NA12=cp.Variable((self.state_size, self.input_size)),
+            NA21=cp.Variable((self.output_size, self.state_size)),
+            NA22=cp.Variable((self.output_size, self.input_size)),
+        )
+        self.backoff_veps = cp.Variable(pos=True)
+
+        controller_params = ControllerThetahatParameters(
+            S=self.backoff_vThetahat.S,
+            R=self.backoff_vThetahat.R,
+            NA11=self.backoff_vThetahat.NA11,
+            NA12=self.backoff_vThetahat.NA12,
+            NA21=self.backoff_vThetahat.NA21,
+            NA22=self.backoff_vThetahat.NA22,
+            NB=np.zeros((self.state_size, self.nonlin_size)),
+            NC=np.zeros((self.nonlin_size, self.state_size)),
+            Dkuw=np.zeros((self.output_size, self.nonlin_size)),
+            Dkvyhat=np.zeros((self.nonlin_size, self.input_size)),
+            Dkvwhat=np.zeros((self.nonlin_size, self.nonlin_size)),
+            Lambda=np.zeros((self.nonlin_size, self.nonlin_size)),
+        )
+        mat = construct_dissipativity_matrix(
+            plant_params=self.plant_params,
+            LDeltap=self.LDeltap,
+            LX=self.LX,
+            controller_params=controller_params,
+            stacker="cvxpy",
+        )
+
+        # fmt: off
+        cost_projection_error = sum([
+            cp.sum_squares(self.backoff_pThetahat.S - self.backoff_vThetahat.S),
+            cp.sum_squares(self.backoff_pThetahat.R - self.backoff_vThetahat.R),
+            cp.sum_squares(self.backoff_pThetahat.NA11 - self.backoff_vThetahat.NA11),
+            cp.sum_squares(self.backoff_pThetahat.NA12 - self.backoff_vThetahat.NA12),
+            cp.sum_squares(self.backoff_pThetahat.NA21 - self.backoff_vThetahat.NA21),
+            cp.sum_squares(self.backoff_pThetahat.NA22 - self.backoff_vThetahat.NA22),
+        ])
+        constraints = [
+            self.backoff_vThetahat.S >> self.eps * np.eye(self.backoff_vThetahat.S.shape[0]),
+            self.backoff_vThetahat.R >> self.eps * np.eye(self.backoff_vThetahat.R.shape[0]),
+            cp.bmat([
+                [self.backoff_vThetahat.R, np.eye(self.backoff_vThetahat.R.shape[0])],
+                [np.eye(self.backoff_vThetahat.S.shape[0]), self.backoff_vThetahat.S],
+            ]) >> self.backoff_veps * np.eye(self.backoff_vThetahat.R.shape[0] + self.backoff_vThetahat.S.shape[0]),
+            # Dissipativity condition
+            mat << 0,
+            # Backoff
+            cost_projection_error <= self.backoff_factor**2 * self.backoff_optimal_projection_error
+        ]
+        # fmt: on
+
+        objective = self.backoff_veps
+        self.backoff_problem = cp.Problem(cp.Maximize(objective), constraints)
+
+    def base_project(
         self, controller_params: ControllerLTIThetahatParameters, solver=cp.MOSEK, **kwargs
     ):
         """Projects input variables to set corresponding to dissipative controllers."""
         K = controller_params
-        self.pThetahat.S.value = K.S
-        self.pThetahat.R.value = K.R
-        self.pThetahat.NA11.value = K.NA11
-        self.pThetahat.NA12.value = K.NA12
-        self.pThetahat.NA21.value = K.NA21
-        self.pThetahat.NA22.value = K.NA22
+        self.proj_pThetahat.S.value = K.S
+        self.proj_pThetahat.R.value = K.R
+        self.proj_pThetahat.NA11.value = K.NA11
+        self.proj_pThetahat.NA12.value = K.NA12
+        self.proj_pThetahat.NA21.value = K.NA21
+        self.proj_pThetahat.NA22.value = K.NA22
 
         try:
             # t0 = time.perf_counter()
-            self.problem.solve(enforce_dpp=True, solver=solver, **kwargs)
+            self.proj_problem.solve(enforce_dpp=True, solver=solver, **kwargs)
             # t1 = time.perf_counter()
             # print(f"Projection solving took {t1-t0} seconds.")
         except Exception as e:
@@ -539,19 +778,82 @@ class LTIProjector:
             cp.OPTIMAL_INACCURATE,
             cp.UNBOUNDED_INACCURATE,
         ]
-        if self.problem.status not in feas_stats:
-            print(f"Failed to solve with status {self.problem.status}")
+        if self.proj_problem.status not in feas_stats:
+            print(f"Failed to solve with status {self.proj_problem.status}")
             raise Exception()
-        print(f"Projection objective: {self.problem.value}")
+        # print(f"Projection objective: {self.proj_problem.value}")
 
         new_controller_params = ControllerLTIThetahatParameters(
-            S=self.vThetahat.S.value,
-            R=self.vThetahat.R.value,
-            NA11=self.vThetahat.NA11.value,
-            NA12=self.vThetahat.NA12.value,
-            NA21=self.vThetahat.NA21.value,
-            NA22=self.vThetahat.NA22.value,
+            S=self.proj_vThetahat.S.value,
+            R=self.proj_vThetahat.R.value,
+            NA11=self.proj_vThetahat.NA11.value,
+            NA12=self.proj_vThetahat.NA12.value,
+            NA21=self.proj_vThetahat.NA21.value,
+            NA22=self.proj_vThetahat.NA22.value,
         )
+        return new_controller_params, {"value": self.proj_problem.value}
+
+    def project(
+        self, controller_params: ControllerLTIThetahatParameters, solver=cp.MOSEK, **kwargs
+    ):
+        """Projects input variables to set corresponding to dissipative controllers, allowing some suboptimality to improve conditioning."""
+        # First solve projection to get optimal projection error
+        _, info = self.base_project(controller_params, solver=solver, **kwargs)
+        self.backoff_optimal_projection_error.value = info["value"]
+
+        # Then solve backoff problem which allows some suboptimality in projection,
+        # but should improve conditioning of thetahat->theta reconstruction.
+        K = controller_params
+        self.backoff_pThetahat.S.value = K.S
+        self.backoff_pThetahat.R.value = K.R
+        self.backoff_pThetahat.NA11.value = K.NA11
+        self.backoff_pThetahat.NA12.value = K.NA12
+        self.backoff_pThetahat.NA21.value = K.NA21
+        self.backoff_pThetahat.NA22.value = K.NA22
+
+        try:
+            # t0 = time.perf_counter()
+            self.backoff_problem.solve(enforce_dpp=True, solver=solver, **kwargs)
+            # t1 = time.perf_counter()
+            # print(f"Projection solving took {t1-t0} seconds.")
+        except Exception as e:
+            print(f"Failed to solve: {e}")
+            raise e
+
+        feas_stats = [
+            cp.OPTIMAL,
+            cp.UNBOUNDED,
+            cp.OPTIMAL_INACCURATE,
+            cp.UNBOUNDED_INACCURATE,
+        ]
+        if self.backoff_problem.status not in feas_stats:
+            print(f"Failed to solve with status {self.backoff_problem.status}")
+            raise Exception()
+        # print(f"Projection objective: {self.backoff_problem.value}")
+
+        new_controller_params = ControllerLTIThetahatParameters(
+            S=self.backoff_vThetahat.S.value,
+            R=self.backoff_vThetahat.R.value,
+            NA11=self.backoff_vThetahat.NA11.value,
+            NA12=self.backoff_vThetahat.NA12.value,
+            NA21=self.backoff_vThetahat.NA21.value,
+            NA22=self.backoff_vThetahat.NA22.value,
+        )
+
+        # Testing
+        print(f"Backoff eps value: {self.backoff_veps.value}")
+        # fmt: off
+        cost_projection_error = np.sqrt(np.sum([
+            np.sum(np.square(controller_params.S    - new_controller_params.S)),
+            np.sum(np.square(controller_params.R    - new_controller_params.R)),
+            np.sum(np.square(controller_params.NA11 - new_controller_params.NA11)),
+            np.sum(np.square(controller_params.NA12 - new_controller_params.NA12)),
+            np.sum(np.square(controller_params.NA21 - new_controller_params.NA21)),
+            np.sum(np.square(controller_params.NA22 - new_controller_params.NA22)),
+        ]))
+        print(f"Projection error before vs after backoff: {np.sqrt(info['value'])} -> {cost_projection_error}")
+        # fmt: on
+
         return new_controller_params
 
     def is_dissipative(self, controller_params: ControllerLTIThetahatParameters):

@@ -7,6 +7,7 @@ from ray.rllib.models.torch.recurrent_net import RecurrentNetwork
 from ray.rllib.utils.annotations import override
 from torchdeq.norm import apply_norm, reset_norm
 
+import lti_controllers
 from activations import activations_map
 from thetahat_dissipativity import Projector
 from utils import build_mlp, from_numpy, to_numpy, uniform
@@ -42,9 +43,12 @@ class DissipativeRINN(RecurrentNetwork, nn.Module):
     #   dt
     #   baseline_n_layers: 2
     #   baseline_size: 64
+    #   eps: 1e-6
     #   plant
     #   plant_config
-    #   eps: 1e-6
+    #   trs_mode: fixed
+    #   min_trs:  1.0
+    #   backoff_factor: 1.1
     def __init__(
         self,
         obs_space,
@@ -107,37 +111,78 @@ class DissipativeRINN(RecurrentNetwork, nn.Module):
         )
         self._cur_value = None
 
-        # Define parameters
-        # Those with _bar suffix indicate ones that will be used to construct the decision variables.
-        # The _T suffix indicates transpose
-
-        self.Duw_T = nn.Parameter(uniform(self.nonlin_size, self.output_size))
-        self.S_bar = nn.Parameter(uniform(self.state_size, self.state_size))
-        self.R_bar = nn.Parameter(uniform(self.state_size, self.state_size))
-        self.Lambda_bar = nn.Parameter(torch.rand(self.nonlin_size))
-        self.NA11 = nn.Parameter(uniform(self.state_size, self.state_size))
-        self.NA12 = nn.Parameter(uniform(self.state_size, self.input_size))
-        self.NA21 = nn.Parameter(uniform(self.output_size, self.state_size))
-        self.NA22 = nn.Parameter(uniform(self.output_size, self.input_size))
-        self.NB = nn.Parameter(uniform(self.state_size, self.nonlin_size))
-        self.NC = nn.Parameter(uniform(self.nonlin_size, self.state_size))
-        self.Dvyhat = nn.Parameter(uniform(self.nonlin_size, self.input_size))
-        self.Dvwhat = nn.Parameter(uniform(self.nonlin_size, self.nonlin_size))
-        # self.Dvwhat = nn.Parameter(torch.zeros((self.nonlin_size, self.nonlin_size)))
-
-        apply_norm(self)
-
         self.eps = model_config["eps"] if "eps" in model_config else 1e-6
 
         assert "plant" in model_config
         assert "plant_config" in model_config
         plant = model_config["plant"](model_config["plant_config"])
         np_plant_params = plant.get_params()
-        self.plant_params = np_plant_params.np_to_torch(device=self.Duw_T.device)
+        self.plant_params = np_plant_params.np_to_torch(device=self.log_stds.device)
         assert self.state_size == self.plant_params.Ap.shape[0]
 
-        trs_mode = model_config["trs_mode"] if "trs_mode" in model_config else "variable"
+        # Define parameters
+        # Those with _bar suffix indicate ones that will be used to construct the decision variables.
+        # The _T suffix indicates transpose
+
+        lti_initializer = (
+            model_config["lti_initializer"] if "lti_initializer" in model_config else None
+        )
+        if lti_initializer is not None:
+            print(f"Initializing using {lti_initializer} LTI controller.")
+            lti_controller_kwargs = (
+                model_config["lti_initializer_kwargs"]
+                if "lti_initializer_kwargs" in model_config
+                else {}
+            )
+            lti_controller_kwargs["state_size"] = self.state_size
+            lti_controller_kwargs["input_size"] = self.input_size
+            lti_controller_kwargs["output_size"] = self.output_size
+            lti_controller, info = lti_controllers.controller_map[lti_initializer](
+                np_plant_params, **lti_controller_kwargs
+            )
+            lti_controller = lti_controller.np_to_torch(device=self.log_stds.device)
+            if "thetahat" in info:
+                np_lti_thetahat = info["thetahat"]
+                lti_thetahat = np_lti_thetahat.np_to_torch(device=self.log_stds.device)
+
+                S_bar = np.linalg.cholesky(np_lti_thetahat.S).T
+                R_bar = np.linalg.cholesky(np_lti_thetahat.R).T
+
+                self.Duw_T = nn.Parameter(torch.zeros((self.nonlin_size, self.output_size)))
+                self.S_bar = nn.Parameter(from_numpy(S_bar, device=self.log_stds.device))
+                self.R_bar = nn.Parameter(from_numpy(R_bar, device=self.log_stds.device))
+                self.Lambda_bar = nn.Parameter(torch.zeros(self.nonlin_size))
+                self.NA11 = nn.Parameter(lti_thetahat.NA11)
+                self.NA12 = nn.Parameter(lti_thetahat.NA12)
+                self.NA21 = nn.Parameter(lti_thetahat.NA21)
+                self.NA22 = nn.Parameter(lti_thetahat.NA22)
+                self.NB = nn.Parameter(torch.zeros((self.state_size, self.nonlin_size)))
+                self.NC = nn.Parameter(torch.zeros((self.nonlin_size, self.state_size)))
+                self.Dvyhat = nn.Parameter(torch.zeros((self.nonlin_size, self.input_size)))
+                self.Dvwhat = nn.Parameter(torch.zeros((self.nonlin_size, self.nonlin_size)))
+            else:
+                # TODO(Neelay) construct LTI thetahat from LTI theta parameters.
+                raise NotImplementedError()
+        else:
+            self.Duw_T = nn.Parameter(uniform(self.nonlin_size, self.output_size))
+            self.S_bar = nn.Parameter(uniform(self.state_size, self.state_size))
+            self.R_bar = nn.Parameter(uniform(self.state_size, self.state_size))
+            self.Lambda_bar = nn.Parameter(torch.rand(self.nonlin_size))
+            self.NA11 = nn.Parameter(uniform(self.state_size, self.state_size))
+            self.NA12 = nn.Parameter(uniform(self.state_size, self.input_size))
+            self.NA21 = nn.Parameter(uniform(self.output_size, self.state_size))
+            self.NA22 = nn.Parameter(uniform(self.output_size, self.input_size))
+            self.NB = nn.Parameter(uniform(self.state_size, self.nonlin_size))
+            self.NC = nn.Parameter(uniform(self.nonlin_size, self.state_size))
+            self.Dvyhat = nn.Parameter(uniform(self.nonlin_size, self.input_size))
+            self.Dvwhat = nn.Parameter(uniform(self.nonlin_size, self.nonlin_size))
+            # self.Dvwhat = nn.Parameter(torch.zeros((self.nonlin_size, self.nonlin_size)))
+
+        apply_norm(self)
+
+        trs_mode = model_config["trs_mode"] if "trs_mode" in model_config else "fixed"
         min_trs = model_config["min_trs"] if "min_trs" in model_config else 1.0
+        backoff_factor = model_config["backoff_factor"] if "backoff_factor" in model_config else 1.1
 
         self.projector = Projector(
             np_plant_params,
@@ -148,6 +193,7 @@ class DissipativeRINN(RecurrentNetwork, nn.Module):
             input_size=self.input_size,
             trs_mode=trs_mode,
             min_trs=min_trs,
+            backoff_factor=backoff_factor
         )
 
         self.oldtheta = None

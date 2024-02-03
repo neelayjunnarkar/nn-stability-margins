@@ -35,8 +35,8 @@ if use_savio:
     N_CPUS  = int(os.getenv('SLURM_CPUS_ON_NODE'))
     JOB_ID = os.getenv('SLURM_JOB_ID')
 else:
-    # N_CPUS = 1  # test
-    N_CPUS = multiprocessing.cpu_count() 
+    N_CPUS = 1  # test
+    # N_CPUS = multiprocessing.cpu_count() 
 n_tasks = 1
 n_workers_per_task = int(math.floor(N_CPUS / n_tasks)) - 1 - 1
 
@@ -90,16 +90,16 @@ config = {
             "dt": dt,
             "plant": env,
             "plant_config": env_config,
-            "eps": 1e-4,
+            "eps": 1e-3,
             "trs_mode": "fixed",
             "min_trs": 1.0,
             "backoff_factor": 1.1,
-            # "lti_initializer": "dissipative_thetahat",
-            # "lti_initializer_kwargs": {
-            #     "trs_mode": "fixed",
-            #     "min_trs": 1.0,
-            #     "backoff_factor": 1.1,
-            # }
+            "lti_initializer": "dissipative_thetahat",
+            "lti_initializer_kwargs": {
+                "trs_mode": "fixed",
+                "min_trs": 1.0,
+                "backoff_factor": 1.1,
+            }
         }
         # "custom_model": RINN,
         # "custom_model_config": {
@@ -182,7 +182,7 @@ config = {
         #     # },
         # }
     },
-    "lr": 1e-6,
+    "lr": 1e-3,
     "num_workers": n_workers_per_task,
     "framework": "torch",
     "num_gpus": 0,  # 1,

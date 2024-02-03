@@ -280,6 +280,11 @@ class ControllerThetahatParameters:
         V = svdU @ sqrt_svdSigma
         U = svdV_T.t() @ sqrt_svdSigma
 
+        # V = self.R
+        # U = torch.linalg.solve(
+        #     V, torch.eye(self.R.shape[0], device=V.device) - torch.mm(self.R, self.S)
+        # ).t()
+
         # Construct P via P = [I, S; 0, U^T] Y^-1
         # fmt: off
         Y = torch.vstack((

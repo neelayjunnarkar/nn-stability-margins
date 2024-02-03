@@ -30,191 +30,84 @@ TASK_ID = int(os.getenv("SLURM_ARRAY_TASK_ID"))
 n_tasks = 1
 n_workers_per_task = int(math.floor(N_CPUS / n_tasks)) - 1 - 1
 
-## Env Config by Task
-T = None
-if TASK_ID == 0:
-    T = 2
-elif TASK_ID == 1:
-    T = 5
-elif TASK_ID == 2:
-    T = 2
-elif TASK_ID == 3:
-    T = 5
-elif TASK_ID == 4:
-    T = 2
-elif TASK_ID == 5:
-    T = 5
-elif TASK_ID == 6:
-    T = 2
-elif TASK_ID == 7:
-    T = 5
-else:
-    raise ValueError(f"Task ID {TASK_ID} unexpected.")
+# ## Env Config by Task
+# T = None
+# if TASK_ID == 0:
+#     T = 2
+# elif TASK_ID == 1:
+#     T = 5
+# elif TASK_ID == 2:
+#     T = 2
+# elif TASK_ID == 3:
+#     T = 5
+# else:
+#     raise ValueError(f"Task ID {TASK_ID} unexpected.")
 
-assert T is not None
+# assert T is not None
 
-# Same dt must be used in RNN and RINN and DissipativeRINN
-# dt = 0.01
-# env = InvertedPendulumEnv
-# env_config = {
-#     "observation": "partial",
-#     "normed": True,
-#     "dt": dt,
-#     "supply_rate": "stability",
-#     "disturbance_model": "occasional"
-# }
-dt = 0.001  # 0.0001
-env = FlexibleArmEnv
+# Same dt must be used in the controller model (RNN and RINN and DissipativeRINN)
+dt = 0.01
+env = InvertedPendulumEnv
 env_config = {
-    "observation": "full",
+    "observation": "partial",
     "normed": True,
     "dt": dt,
-    "rollout_length": int(T / dt) - 1,  # 10000,
-    "supply_rate": "l2_gain",
-    "disturbance_model": "none",
-    "disturbance_design_model": "occasional",
-    "design_model": "rigid",
+    "supply_rate": "stability",
+    "disturbance_model": "occasional",
 }
+# dt = 0.001  # 0.0001
+# env = FlexibleArmEnv
+# env_config = {
+#     "observation": "full",
+#     "normed": True,
+#     "dt": dt,
+#     "rollout_length": int(T / dt) - 1,  # 10000,
+#     "supply_rate": "l2_gain",
+#     "disturbance_model": "none",
+#     "disturbance_design_model": "occasional",
+#     "design_model": "rigid",
+# }
 
 ## Model Config by Task
 
-custom_model = None
-custom_model_config = None
+custom_model = DissipativeRINN
+custom_model_config = {
+    "state_size": 2,
+    "nonlin_size": 16,
+    "log_std_init": np.log(1.0),
+    "dt": dt,
+    "plant": env,
+    "plant_config": env_config,
+    "eps": 1e-3,
+    "trs_mode": "fixed",
+    "min_trs": 1.0,
+    "backoff_factor": 1.1,
+    "lti_initializer": "dissipative_thetahat",
+    "lti_initializer_kwargs": {
+        "trs_mode": "fixed",
+        "min_trs": 1.0,
+        "backoff_factor": 1.1,
+    },
+}
+learning_rate = None
 if TASK_ID == 0:
     print("Task 0")
-    custom_model = DissipativeSimplestRINN
-    custom_model_config = {
-        "state_size": 2,
-        "nonlin_size": 16,
-        "log_std_init": np.log(1.0),
-        "dt": dt,
-        "plant": env,
-        "plant_config": env_config,
-        "eps": 1e-3,
-        "mode": "thetahat",
-        "trs_mode": "fixed",
-        "min_trs": 1.5,
-        "lti_initializer": "dissipative_thetahat",
-        "lti_initializer_kwargs": {
-            "trs_mode": "fixed",
-            "min_trs": 1.5,
-        },
-    }
+    learning_rate = 1e-3
 elif TASK_ID == 1:
     print("Task 1")
-    custom_model = DissipativeSimplestRINN
-    custom_model_config = {
-        "state_size": 2,
-        "nonlin_size": 16,
-        "log_std_init": np.log(1.0),
-        "dt": dt,
-        "plant": env,
-        "plant_config": env_config,
-        "eps": 1e-3,
-        "mode": "thetahat",
-        "trs_mode": "fixed",
-        "min_trs": 1.5,
-        "lti_initializer": "dissipative_thetahat",
-        "lti_initializer_kwargs": {
-            "trs_mode": "fixed",
-            "min_trs": 1.5,
-        },
-    }
+    learning_rate = 1e-6
 elif TASK_ID == 2:
     print("Task 2")
-    custom_model = DissipativeSimplestRINN
-    custom_model_config = {
-        "state_size": 2,
-        "nonlin_size": 16,
-        "log_std_init": np.log(1.0),
-        "dt": dt,
-        "plant": env,
-        "plant_config": env_config,
-        "eps": 1e-3,
-        "mode": "thetahat",
-        "trs_mode": "fixed",
-        "min_trs": 1.5,
-    }
+    learning_rate = 1e-7
 elif TASK_ID == 3:
     print("Task 3")
-    custom_model = DissipativeSimplestRINN
-    custom_model_config = {
-        "state_size": 2,
-        "nonlin_size": 16,
-        "log_std_init": np.log(1.0),
-        "dt": dt,
-        "plant": env,
-        "plant_config": env_config,
-        "eps": 1e-3,
-        "mode": "thetahat",
-        "trs_mode": "fixed",
-        "min_trs": 1.5,
-    }
-elif TASK_ID == 4:
-    print("Task 4")
-    custom_model = RINN
-    custom_model_config = {
-        "state_size": 2,
-        "nonlin_size": 16,
-        "log_std_init": np.log(1.0),
-        "dt": dt,
-        "plant": env,
-        "plant_config": env_config,
-        "eps": 1e-3,
-    }
-elif TASK_ID == 5:
-    print("Task 5")
-    custom_model = RINN
-    custom_model_config = {
-        "state_size": 2,
-        "nonlin_size": 16,
-        "log_std_init": np.log(1.0),
-        "dt": dt,
-        "plant": env,
-        "plant_config": env_config,
-        "eps": 1e-3,
-    }
-elif TASK_ID == 6:
-    print("Task 6")
-    custom_model = LTIModel
-    custom_model_config = {
-        "dt": dt,
-        "plant": env,
-        "plant_config": env_config,
-        "learn": True,
-        "log_std_init": np.log(1.0),
-        "state_size": 2,
-        "trs_mode": "fixed",
-        "min_trs": 1.5,
-        "lti_controller": "dissipative_thetahat",
-        "lti_controller_kwargs": {
-            "trs_mode": "fixed",
-            "min_trs": 1.5,
-        },
-    }
-elif TASK_ID == 7:
-    print("Task 7")
-    custom_model = LTIModel
-    custom_model_config = {
-        "dt": dt,
-        "plant": env,
-        "plant_config": env_config,
-        "learn": True,
-        "log_std_init": np.log(1.0),
-        "state_size": 2,
-        "trs_mode": "fixed",
-        "min_trs": 1.5,
-        "lti_controller": "dissipative_thetahat",
-        "lti_controller_kwargs": {
-            "trs_mode": "fixed",
-            "min_trs": 1.5,
-        },
-    }
+    learning_rate = 1e-8
 else:
     raise ValueError(f"Task ID {TASK_ID} unexpected.")
 
 assert custom_model is not None
 assert custom_model_config is not None
+assert learning_rate is not None
 
 # Configure the algorithm.
 config = {
@@ -224,7 +117,7 @@ config = {
         "custom_model": custom_model,
         "custom_model_config": custom_model_config,
     },
-    "lr": 1e-3,
+    "lr": learning_rate,
     "num_workers": n_workers_per_task,
     "framework": "torch",
     "num_gpus": 0,  # 1,
@@ -268,7 +161,7 @@ results = tune.run(
     },
     verbose=1,
     trial_name_creator=name_creator,
-    name="FlexArm_Full_L2_None_Occas_Rigid",
+    name="InvPend_Partial_Stab_Occas",
     local_dir="ray_results",
     checkpoint_at_end=True,
     checkpoint_freq=1000,

@@ -151,6 +151,8 @@ class DissipativeRINN(RecurrentNetwork, nn.Module):
                 self.Duw_T = nn.Parameter(torch.zeros((self.nonlin_size, self.output_size)))
                 self.S_bar = nn.Parameter(from_numpy(S_bar, device=self.log_stds.device))
                 self.R_bar = nn.Parameter(from_numpy(R_bar, device=self.log_stds.device))
+                # self.S = nn.Parameter(lti_thetahat.S)
+                # self.R = nn.Parameter(lti_thetahat.R)
                 self.Lambda_bar = nn.Parameter(torch.zeros(self.nonlin_size))
                 self.NA11 = nn.Parameter(lti_thetahat.NA11)
                 self.NA12 = nn.Parameter(lti_thetahat.NA12)
@@ -165,9 +167,17 @@ class DissipativeRINN(RecurrentNetwork, nn.Module):
                 raise NotImplementedError()
         else:
             self.Duw_T = nn.Parameter(uniform(self.nonlin_size, self.output_size))
-            self.S_bar = nn.Parameter(uniform(self.state_size, self.state_size))
-            self.R_bar = nn.Parameter(uniform(self.state_size, self.state_size))
-            self.Lambda_bar = nn.Parameter(torch.rand(self.nonlin_size))
+            self.S_bar = nn.Parameter(
+                torch.eye(self.state_size) + uniform(self.state_size, self.state_size)
+            )
+            self.R_bar = nn.Parameter(
+                torch.eye(self.state_size) + uniform(self.state_size, self.state_size)
+            )
+            # S_bar = uniform(self.state_size, self.state_size)
+            # R_bar = uniform(self.state_size, self.state_size)
+            # self.S = nn.Parameter(S_bar.t() @ S_bar + self.eps * torch.eye(self.state_size))
+            # self.R = nn.Parameter(R_bar.t() @ R_bar + self.eps * torch.eye(self.state_size))
+            self.Lambda_bar = nn.Parameter(torch.sqrt(torch.rand(self.nonlin_size) + 0.5))
             self.NA11 = nn.Parameter(uniform(self.state_size, self.state_size))
             self.NA12 = nn.Parameter(uniform(self.state_size, self.input_size))
             self.NA21 = nn.Parameter(uniform(self.output_size, self.state_size))
@@ -193,7 +203,7 @@ class DissipativeRINN(RecurrentNetwork, nn.Module):
             input_size=self.input_size,
             trs_mode=trs_mode,
             min_trs=min_trs,
-            backoff_factor=backoff_factor
+            backoff_factor=backoff_factor,
         )
 
         self.oldtheta = None
@@ -216,7 +226,7 @@ class DissipativeRINN(RecurrentNetwork, nn.Module):
             print(f"Is dissipative: {is_dissipative}")
             if not is_dissipative:
                 self.enforce_dissipativity()
-                self.construct_thetahat()
+        self.construct_thetahat()
         # fmt: off
         thetahat = ControllerThetahatParameters(
             self.S, self.R, self.NA11, self.NA12, self.NA21, self.NA22,
@@ -249,35 +259,40 @@ class DissipativeRINN(RecurrentNetwork, nn.Module):
 
         if self.oldtheta is not None:
             print_norms(
-                theta_mat - self.oldtheta, f"theta - oldtheta: {torch.allclose(theta_mat, self.oldtheta)}"
+                theta_mat - self.oldtheta,
+                f"theta - oldtheta: {torch.allclose(theta_mat, self.oldtheta)}",
             )
         self.oldtheta = theta_mat.detach().clone()
 
     def construct_thetahat(self):
         """From the _bar parameters, construct the decision variables."""
-        if self.projected:
-            eps = 0.0
-        else:
-            eps = self.eps
+        # if self.projected:
+        #     eps = 0.0
+        # else:
+        #     eps = self.eps
 
         assert self.S_bar.ndim == 2
         assert self.S_bar.shape[0] == self.state_size and self.S_bar.shape[1] == self.state_size
-        self.S = torch.mm(self.S_bar.t(), self.S_bar) + eps * torch.eye(
-            self.state_size, device=self.S_bar.device
-        )
+        self.S = torch.mm(self.S_bar.t(), self.S_bar)
+        # + eps * torch.eye(
+        #     self.state_size, device=self.S_bar.device
+        # )
 
         assert self.R_bar.ndim == 2
         assert self.R_bar.shape[0] == self.state_size and self.R_bar.shape[1] == self.state_size
-        self.R = torch.mm(self.R_bar.t(), self.R_bar) + eps * torch.eye(
-            self.state_size, device=self.R_bar.device
-        )
+        self.R = torch.mm(self.R_bar.t(), self.R_bar)
+        # + eps * torch.eye(
+        #     self.state_size, device=self.R_bar.device
+        # )
 
         assert self.Lambda_bar.ndim == 1
         assert self.Lambda_bar.shape[0] == self.nonlin_size
-        self.Lambda = self.Lambda_bar.square() + eps * torch.ones(
-            self.nonlin_size, device=self.Lambda_bar.device
-        )
-        self.Lambda = self.Lambda.diag()
+        self.Lambda = self.Lambda_bar.square().diag()
+        # + eps * torch.ones(
+        #     self.nonlin_size, device=self.Lambda_bar.device
+        # )
+        # self.Lambda = self.Lambda.diag()
+        # self.Lambda = self.Lambda_bar.diag()
 
         self.projected = True
 
@@ -303,11 +318,14 @@ class DissipativeRINN(RecurrentNetwork, nn.Module):
         S_bar = np.linalg.cholesky(np_new_controller_params.S).T
         R_bar = np.linalg.cholesky(np_new_controller_params.R).T
         Lambda_bar = np.sqrt(np.diag(np_new_controller_params.Lambda))
+        # Lambda_bar = new_k.Lambda.diag()
 
         missing, unexpected = self.load_state_dict(
             {
                 "S_bar": from_numpy(S_bar, device=self.S_bar.device),
                 "R_bar": from_numpy(R_bar, device=self.R_bar.device),
+                # "S": new_k.S,
+                # "R": new_k.R,
                 "NA11": new_k.NA11,
                 "NA12": new_k.NA12,
                 "NA21": new_k.NA21,
@@ -318,6 +336,7 @@ class DissipativeRINN(RecurrentNetwork, nn.Module):
                 "Dvyhat": new_k.Dkvyhat,
                 "Dvwhat": new_k.Dkvwhat,
                 "Lambda_bar": from_numpy(Lambda_bar, device=self.Lambda_bar.device),
+                # "Lambda_bar": Lambda_bar
             },
             strict=False,
         )

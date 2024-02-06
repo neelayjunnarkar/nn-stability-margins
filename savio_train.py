@@ -10,7 +10,7 @@ import ray
 from ray import tune
 from ray.rllib.agents.ppo import PPOTrainer
 
-from envs import FlexibleArmEnv, InvertedPendulumEnv
+from envs import FlexibleArmEnv, InvertedPendulumEnv, TimeDelayInvertedPendulumEnv
 from models import (
     RINN,
     RNN,
@@ -46,14 +46,23 @@ n_workers_per_task = int(math.floor(N_CPUS / n_tasks)) - 1 - 1
 # assert T is not None
 
 # Same dt must be used in the controller model (RNN and RINN and DissipativeRINN)
+# dt = 0.01
+# env = InvertedPendulumEnv
+# env_config = {
+#     "observation": "partial",
+#     "normed": True,
+#     "dt": dt,
+#     "supply_rate": "stability",
+#     "disturbance_model": "occasional",
+# }
 dt = 0.01
-env = InvertedPendulumEnv
+env = TimeDelayInvertedPendulumEnv  # 1.0
 env_config = {
     "observation": "partial",
     "normed": True,
     "dt": dt,
-    "supply_rate": "stability",
-    "disturbance_model": "occasional",
+    "design_time_delay": 0.07,
+    "time_delay_steps": 5,
 }
 # dt = 0.001  # 0.0001
 # env = FlexibleArmEnv
@@ -70,38 +79,81 @@ env_config = {
 
 ## Model Config by Task
 
-custom_model = DissipativeRINN
-custom_model_config = {
-    "state_size": 2,
-    "nonlin_size": 16,
-    "log_std_init": np.log(1.0),
-    "dt": dt,
-    "plant": env,
-    "plant_config": env_config,
-    "eps": 1e-3,
-    "trs_mode": "fixed",
-    "min_trs": 1.0,
-    "backoff_factor": 1.1,
-    "lti_initializer": "dissipative_thetahat",
-    "lti_initializer_kwargs": {
-        "trs_mode": "fixed",
-        "min_trs": 1.0,
-        "backoff_factor": 1.1,
-    },
-}
+custom_model = None
+custom_model_config = None
 learning_rate = None
 if TASK_ID == 0:
     print("Task 0")
+    custom_model = DissipativeSimplestRINN
+    custom_model_config = {
+        "state_size": 4,
+        "nonlin_size": 16,
+        "log_std_init": np.log(1.0),
+        "dt": dt,
+        "plant": env,
+        "plant_config": env_config,
+        "eps": 1e-3,
+        "mode": "thetahat",
+        "trs_mode": "fixed",
+        "min_trs": 1.0,
+        "lti_initializer": "dissipative_thetahat",
+        "lti_initializer_kwargs": {
+            "trs_mode": "fixed",
+            "min_trs": 1.0,
+        },
+    }
     learning_rate = 1e-3
 elif TASK_ID == 1:
     print("Task 1")
-    learning_rate = 1e-6
+    custom_model = RINN
+    custom_model_config = {
+        "state_size": 4,
+        "nonlin_size": 16,
+        "log_std_init": np.log(1.0),
+        "dt": dt,
+        "plant": env,
+        "plant_config": env_config,
+        "eps": 1e-3,
+    }
+    learning_rate = 1e-3
 elif TASK_ID == 2:
     print("Task 2")
-    learning_rate = 1e-7
+    custom_model = LTIModel
+    custom_model_config = {
+        "dt": dt,
+        "plant": env,
+        "plant_config": env_config,
+        "learn": True,
+        "log_std_init": np.log(1.0),
+        "state_size": 4,
+        "trs_mode": "fixed",
+        "min_trs": 1.0,  # 1.5, # 1.44,
+        "lti_controller": "dissipative_thetahat",
+        "lti_controller_kwargs": {
+            "trs_mode": "fixed",
+            "min_trs": 1.0,  # 1.5 # 1.44
+        },
+    }
+    learning_rate = 1e-3
 elif TASK_ID == 3:
     print("Task 3")
-    learning_rate = 1e-8
+    custom_model = LTIModel
+    custom_model_config = {
+        "dt": dt,
+        "plant": env,
+        "plant_config": env_config,
+        "learn": True,
+        "log_std_init": np.log(1.0),
+        "state_size": 4,
+        "trs_mode": "fixed",
+        "min_trs": 1.0,  # 1.5, # 1.44,
+        "lti_controller": "dissipative_thetahat",
+        "lti_controller_kwargs": {
+            "trs_mode": "fixed",
+            "min_trs": 1.0,  # 1.5 # 1.44
+        },
+    }
+    learning_rate = 1e-2
 else:
     raise ValueError(f"Task ID {TASK_ID} unexpected.")
 
@@ -161,7 +213,7 @@ results = tune.run(
     },
     verbose=1,
     trial_name_creator=name_creator,
-    name="InvPend_Partial_Stab_Occas",
+    name="TimeDelayInvPend_Partial_007_5",
     local_dir="ray_results",
     checkpoint_at_end=True,
     checkpoint_freq=1000,

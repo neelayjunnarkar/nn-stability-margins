@@ -30,18 +30,18 @@ class TimeDelayInvertedPendulumEnv(gym.Env):
             self.dt = env_config["dt"]
         else:
             self.dt = 0.01
-        self.time_max = 200
+        self.time_max = 199
 
         # Actual simulated time delay is time_delay_steps*dt seconds
         if "time_delay_steps" in env_config:
             self.time_delay_steps = env_config["time_delay_steps"]
         else:
             self.time_delay_steps = 10
-        
+
         if "design_time_delay" in env_config:
             self.design_time_delay = env_config["design_time_delay"]
         else:
-            self.design_time_delay = 0.2 # seconds
+            self.design_time_delay = 0.2  # seconds
 
         self.max_reward = 2
 
@@ -69,15 +69,8 @@ class TimeDelayInvertedPendulumEnv(gym.Env):
         self.np_random, seed = seeding.np_random(seed)
         return [seed]
 
-    def xdot(self, state, _d, _u):
+    def xdot(self, state, _d, Du):
         assert len(state) == 2
-
-        # Access delayed input
-        if self.input_buffer.full():
-            Du = self.input_buffer.get()
-        else:
-            Du = np.zeros(self.action_space.shape)
-
         x1 = state[0]
         x2 = state[1]
         x1dot = x2
@@ -93,7 +86,8 @@ class TimeDelayInvertedPendulumEnv(gym.Env):
         xdot[1] = x2dot
         return xdot
 
-    def next_state(self, state, d, u):
+    def next_state(self, state, d, Du):
+        # Du is the delayed input
         # # 0th order hold on derivative
         # xdot = self.xdot(state, d, u)
         # state = state + self.dt * xdot
@@ -101,10 +95,10 @@ class TimeDelayInvertedPendulumEnv(gym.Env):
         # Runge-Kutta 4th order
         # Assume d and u are constant
         # More accurate than the 0th order hold
-        k1 = self.xdot(state, d, u)
-        k2 = self.xdot(state + self.dt * k1 / 2, d, u)
-        k3 = self.xdot(state + self.dt * k2 / 2, d, u)
-        k4 = self.xdot(state + self.dt * k3, d, u)
+        k1 = self.xdot(state, d, Du)
+        k2 = self.xdot(state + self.dt * k1 / 2, d, Du)
+        k3 = self.xdot(state + self.dt * k2 / 2, d, Du)
+        k4 = self.xdot(state + self.dt * k3, d, Du)
         state = state + (self.dt / 6) * (k1 + 2 * k2 + 2 * k3 + k4)
 
         return state
@@ -112,13 +106,17 @@ class TimeDelayInvertedPendulumEnv(gym.Env):
     def step(self, u, fail_on_state_space=True, fail_on_time_limit=True):
         u = np.clip(u, -self.max_torque, self.max_torque)
         self.input_buffer.put(u)
+        # Access delayed input
+        if self.input_buffer.full():
+            delayed_u = self.input_buffer.get()
+        else:
+            delayed_u = np.zeros(self.action_space.shape)
 
         d = np.zeros((1,), dtype=np.float32)
-        self.state = self.next_state(self.state, d, u)
+        self.state = self.next_state(self.state, d, delayed_u)
 
         # Reward for small angle, small angular velocity, and small control
-        theta, thetadot = self.state
-        reward_state = np.exp(-(theta**2)) + np.exp(-(thetadot**2))
+        reward_state = np.exp(-np.linalg.norm(self.state)**2)
         reward_control = np.exp(-(u[0] ** 2))
         reward = reward_state + reward_control
         # reward = reward_control
@@ -147,13 +145,13 @@ class TimeDelayInvertedPendulumEnv(gym.Env):
 
     def get_obs(self):
         if self.observation == "full":
-            y = self.state # angular position and angular velocity
+            y = self.state  # angular position and angular velocity
         elif self.observation == "partial":
-            y = self.state[0] # Just angular position
+            y = self.state[0]  # Just angular position
         else:
             raise ValueError(f"Unexpected observation: {self.observation}.")
         if self.normed:
-            y = y/self.observation_space.high
+            y = y / self.observation_space.high
         return y
 
     def get_params(self):
@@ -207,14 +205,41 @@ class TimeDelayInvertedPendulumEnv(gym.Env):
 
         # State space form of phi transfer function (eq. 6) from "An Overview of Integral Quadratic Constraints for
         # Delayed Nonlinear and Parameter-Varying Systems" by Pfifer and Seiler
+        def get_psi1(time_delay):
+            import control as ct
+
+            s = ct.tf("s")
+            # fmt: off
+            phi_tf = (
+                (2 * ((s * time_delay) ** 2 + 3.5 * s * time_delay + 10**-6))
+                / ((s * time_delay) ** 2 + 4.5 * s * time_delay + 7.1)
+            )
+            # fmt: on
+            phi_ss = ct.ss(phi_tf)
+            return phi_ss.A, phi_ss.B, phi_ss.C, phi_ss.D
+
         time_delay = self.design_time_delay
         assert time_delay >= self.time_delay_steps * self.dt
-        Apsi1 = np.array([[0, 1], [-7.1 / (time_delay**2), -4.5 / time_delay]], dtype=np.float32)
-        Bpsi1 = np.array([[0, 0], [0, 1]], dtype=np.float32)
-        Cpsi1 = np.array(
-            [[0, 0], [(-14.2 + 2e-6) / (time_delay**2), -2 / time_delay]], dtype=np.float32
-        )
-        Dpsi1 = np.array([[1, 0], [0, 2]], dtype=np.float32)
+        # These need to be extended to pass through v1 to give the Psi filter
+        (Apsi10, Bpsi10, Cpsi10, Dpsi10) = get_psi1(time_delay)
+        Apsi1 = Apsi10
+        Bpsi1 = np.hstack([np.zeros((2, 1)), Bpsi10])
+        Bpsi1 = np.asarray(Bpsi1).astype(np.float32)
+        Cpsi1 = np.vstack([np.zeros((1, 2)), Cpsi10])
+        Cpsi1 = np.asarray(Cpsi1).astype(np.float32)
+        Dpsi1 = np.bmat([[np.eye(1), np.zeros((1, 1))], [np.zeros((1, 1)), Dpsi10]])
+        Dpsi1 = np.asarray(Dpsi1).astype(np.float32)
+
+        # # State space form of phi transfer function (eq. 6) from "An Overview of Integral Quadratic Constraints for
+        # # Delayed Nonlinear and Parameter-Varying Systems" by Pfifer and Seiler
+        # time_delay = self.design_time_delay
+        # assert time_delay >= self.time_delay_steps * self.dt
+        # Apsi1 = np.array([[0, 1], [-7.1 / (time_delay**2), -4.5 / time_delay]], dtype=np.float32)
+        # Bpsi1 = np.array([[0, 0], [0, 1]], dtype=np.float32)
+        # Cpsi1 = np.array(
+        #     [[0, 0], [(-14.2 + 2e-6) / (time_delay**2), -2 / time_delay]], dtype=np.float32
+        # )
+        # Dpsi1 = np.array([[1, 0], [0, 2]], dtype=np.float32)
         # The transformation "T" in this case is just the identity since Psi2 = I
 
         # fmt: off
@@ -243,10 +268,23 @@ class TimeDelayInvertedPendulumEnv(gym.Env):
         Dped = Dped0
         Dpeu = Dpeu0
 
-        Cpy = np.bmat([[Cpy0, np.zeros((Cpy0.shape[0], Apsi1.shape[0]))]])
+        # fmt: off
+        Cpy = np.bmat([
+            [Cpy0, np.zeros((Cpy0.shape[0], Apsi1.shape[0]))],
+            # [np.zeros((Apsi1.shape[0], Cpy0.shape[1])), 0*np.eye(Apsi1.shape[0])]
+        ])
         Cpy = np.asarray(Cpy).astype(np.float32)
-        Dpyw = Dpyw0
-        Dpyd = Dpyd0
+        Dpyw = np.bmat([
+            [Dpyw0], 
+            # [np.zeros((Apsi1.shape[0], Dpyw0.shape[1]))]
+            ])
+        Dpyw = np.asarray(Dpyw).astype(np.float32)
+        Dpyd = np.bmat([
+            [Dpyd0], 
+            # [np.zeros((Apsi1.shape[0], Dpyd0.shape[1]))]
+            ])
+        Dpyd = np.asarray(Dpyd).astype(np.float32)
+        # fmt: on
 
         MDeltapvv = np.eye(nv, dtype=np.float32)
         MDeltapvw = np.zeros((nv, nw), dtype=np.float32)

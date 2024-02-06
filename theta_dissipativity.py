@@ -460,7 +460,7 @@ class Projector:
         if self.check_problem.status not in feas_stats:
             print(f"Failed to solve with status {self.check_problem.status}")
             return False, None, None
-        print(f"Projection objective: {self.check_problem.value}")
+        # print(f"Projection objective: {self.check_problem.value}")
 
         newP = self.vcheckP.value
         newLambda = self.vcheckLambda.value.toarray()
@@ -595,7 +595,7 @@ class LTIProjector:
         if self.proj_problem.status not in feas_stats:
             print(f"Failed to solve with status {self.proj_problem.status}")
             raise Exception()
-        print(f"Projection objective: {self.proj_problem.value}")
+        # print(f"Projection objective: {self.proj_problem.value}")
 
         new_controller_params = ControllerLTIThetaParameters(
             self.vproj_k.Ak.value,
@@ -688,7 +688,7 @@ class LTIProjector:
         if self.check_problem.status not in feas_stats:
             print(f"Failed to solve with status {self.check_problem.status}")
             return False, None
-        print(f"Projection objective: {self.check_problem.value}")
+        # print(f"Projection objective: {self.check_problem.value}")
 
         newP = self.vcheckP.value
 

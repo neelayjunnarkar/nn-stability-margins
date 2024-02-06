@@ -96,25 +96,30 @@ def phase_portrait(agent_dir, N_PER_DIM, ROLLOUT_LEN):
     return rollouts, env
 
 
-flexarm_lqr_dir = "ray_results/FlexArm_Full_L2_None_Occas_Rigid_LQR/FlexibleArmEnv_LTIModel_0_2024-01-29_12-12-17" # Q = I, R = 1
-# flexarm_lqr_dir = "ray_results/FlexArm_Full_L2_None_Occas_Rigid_LQR/FlexibleArmEnv_LTIModel_0_2024-01-29_14-36-59" # Q = I, R = 0.01
-flexarm_lqr_checkpoint_path = "/checkpoint_000002/checkpoint-2"
+# flexarm_lqr_dir = "ray_results/FlexArm_Full_L2_None_Occas_Rigid_LQR/FlexibleArmEnv_LTIModel_0_2024-01-29_12-12-17" # Q = I, R = 1
+# # flexarm_lqr_dir = "ray_results/FlexArm_Full_L2_None_Occas_Rigid_LQR/FlexibleArmEnv_LTIModel_0_2024-01-29_14-36-59" # Q = I, R = 0.01
+# flexarm_lqr_checkpoint_path = "/checkpoint_000002/checkpoint-2"
 
-lti_dir = "/home/neelay/mnt/savio/stabilizing-ren/ray_results/FlexArm_Full_L2_None_Occas_Rigid/FlexibleArmEnv_LTIModel_16365336_6_0_2024-01-26_22-23-26"
-lti_checkpoint_path = "/checkpoint_001017/checkpoint-1017"
+# lti_dir = "/home/neelay/mnt/savio/stabilizing-ren/ray_results/FlexArm_Full_L2_None_Occas_Rigid/FlexibleArmEnv_LTIModel_16365336_6_0_2024-01-26_22-23-26"
+# lti_checkpoint_path = "/checkpoint_001017/checkpoint-1017"
 
-lti, env = load_agent(lti_dir, lti_checkpoint_path)
+# lti, env = load_agent(lti_dir, lti_checkpoint_path)
 
-lqr, _env = load_agent(flexarm_lqr_dir, flexarm_lqr_checkpoint_path)
-lqr_model = lqr.get_policy().model
-print(lqr_model.A_T, lqr_model.By_T, lqr_model.Cu_T, lqr_model.Duy_T)
+# lqr, _env = load_agent(flexarm_lqr_dir, flexarm_lqr_checkpoint_path)
+# lqr_model = lqr.get_policy().model
+# print(lqr_model.A_T, lqr_model.By_T, lqr_model.Cu_T, lqr_model.Duy_T)
+# env.dt = 0.001
+# env.time_max = int(10/env.dt) - 1
+
+dir = "ray_results/scratch/TimeDelayInvertedPendulumEnv_DissipativeSimplestRINN_0_2024-02-05_22-46-15"
+checkpoint_path = "/checkpoint_000125/checkpoint-125"
+
+agent, env = load_agent(dir, checkpoint_path)
 
 
-env.dt = 0.001
-env.time_max = int(10/env.dt) - 1
 
 print(f"time (s) = {env.dt * env.time_max} with dt = {env.dt} and num steps = {env.time_max}")
-states, actions = compute_rollout(lqr, env, env.reset(np.array([1.0, 0, 0, 0], dtype=np.float32)))
+states, actions = compute_rollout(agent, env, env.reset())
 print(states.shape)
 print(actions.shape)
 
@@ -124,9 +129,9 @@ plt.plot(states[0, :])
 plt.subplot(232)
 plt.plot(states[1, :])
 plt.subplot(234)
-plt.plot(states[2, :])
-plt.subplot(235)
-plt.plot(states[3, :])
+# plt.plot(states[2, :])
+# plt.subplot(235)
+# plt.plot(states[3, :])
 
 plt.subplot(236)
 plt.plot(actions[0, :])

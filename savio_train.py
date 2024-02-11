@@ -55,15 +55,15 @@ n_workers_per_task = int(math.floor(N_CPUS / n_tasks)) - 1 - 1
 #     "supply_rate": "stability",
 #     "disturbance_model": "occasional",
 # }
-dt = 0.01
-env = TimeDelayInvertedPendulumEnv  # 1.0
-env_config = {
-    "observation": "partial",
-    "normed": True,
-    "dt": dt,
-    "design_time_delay": 0.07,
-    "time_delay_steps": 5,
-}
+# dt = 0.01
+# env = TimeDelayInvertedPendulumEnv  # 1.0
+# env_config = {
+#     "observation": "partial",
+#     "normed": True,
+#     "dt": dt,
+#     "design_time_delay": 0.07,
+#     "time_delay_steps": 5,
+# }
 # dt = 0.001  # 0.0001
 # env = FlexibleArmEnv
 # env_config = {
@@ -82,78 +82,49 @@ env_config = {
 custom_model = None
 custom_model_config = None
 learning_rate = None
-if TASK_ID == 0:
-    print("Task 0")
-    custom_model = DissipativeSimplestRINN
-    custom_model_config = {
-        "state_size": 4,
-        "nonlin_size": 16,
-        "log_std_init": np.log(1.0),
+if TASK_ID == 0 or TASK_ID == 1:
+    dt = 0.01
+    env = InvertedPendulumEnv
+    env_config = {
+        "observation": "partial",
+        "normed": True,
         "dt": dt,
-        "plant": env,
-        "plant_config": env_config,
-        "eps": 1e-3,
-        "mode": "thetahat",
-        "trs_mode": "fixed",
-        "min_trs": 1.0,
-        "lti_initializer": "dissipative_thetahat",
-        "lti_initializer_kwargs": {
-            "trs_mode": "fixed",
-            "min_trs": 1.0,
-        },
+        "supply_rate": "stability",
+        "disturbance_model": "occasional",
     }
-    learning_rate = 1e-3
-elif TASK_ID == 1:
-    print("Task 1")
-    custom_model = RINN
-    custom_model_config = {
-        "state_size": 4,
-        "nonlin_size": 16,
-        "log_std_init": np.log(1.0),
+    custom_model = FullyConnectedNetwork
+    custom_model_config = {"n_layers": 2, "size": 19}
+    if TASK_ID == 0:
+        print("Task 0")
+        learning_rate = 1e-3
+    elif TASK_ID == 1:
+        print("Task 1")
+        learning_rate = 1e-4
+    else:
+        raise ValueError(f"Task ID {TASK_ID} unexpected.")
+elif TASK_ID == 2 or TASK_ID == 3:
+    dt = 0.001  # 0.0001
+    env = FlexibleArmEnv
+    env_config = {
+        "observation": "full",
+        "normed": True,
         "dt": dt,
-        "plant": env,
-        "plant_config": env_config,
-        "eps": 1e-3,
+        "rollout_length": int(2.0 / dt) - 1,  # 10000,
+        "supply_rate": "l2_gain",
+        "disturbance_model": "none",
+        "disturbance_design_model": "occasional",
+        "design_model": "rigid",
     }
-    learning_rate = 1e-3
-elif TASK_ID == 2:
-    print("Task 2")
-    custom_model = LTIModel
-    custom_model_config = {
-        "dt": dt,
-        "plant": env,
-        "plant_config": env_config,
-        "learn": True,
-        "log_std_init": np.log(1.0),
-        "state_size": 4,
-        "trs_mode": "fixed",
-        "min_trs": 1.0,  # 1.5, # 1.44,
-        "lti_controller": "dissipative_thetahat",
-        "lti_controller_kwargs": {
-            "trs_mode": "fixed",
-            "min_trs": 1.0,  # 1.5 # 1.44
-        },
-    }
-    learning_rate = 1e-3
-elif TASK_ID == 3:
-    print("Task 3")
-    custom_model = LTIModel
-    custom_model_config = {
-        "dt": dt,
-        "plant": env,
-        "plant_config": env_config,
-        "learn": True,
-        "log_std_init": np.log(1.0),
-        "state_size": 4,
-        "trs_mode": "fixed",
-        "min_trs": 1.0,  # 1.5, # 1.44,
-        "lti_controller": "dissipative_thetahat",
-        "lti_controller_kwargs": {
-            "trs_mode": "fixed",
-            "min_trs": 1.0,  # 1.5 # 1.44
-        },
-    }
-    learning_rate = 1e-2
+    custom_model = FullyConnectedNetwork
+    custom_model_config = {"n_layers": 2, "size": 19}
+    if TASK_ID == 2:
+        print("Task 2")
+        learning_rate = 1e-3
+    elif TASK_ID == 3:
+        print("Task 3")
+        learning_rate = 1e-4
+    else:
+        raise ValueError(f"Task ID {TASK_ID} unexpected.")
 else:
     raise ValueError(f"Task ID {TASK_ID} unexpected.")
 
@@ -205,15 +176,15 @@ def name_creator(trial):
 
 ray.init()
 results = tune.run(
-    # PPOTrainer,
-    ProjectedPPOTrainer,
+    PPOTrainer,
+    # ProjectedPPOTrainer,
     config=config,
     stop={
         "agent_timesteps_total": 6100e3,
     },
     verbose=1,
     trial_name_creator=name_creator,
-    name="TimeDelayInvPend_Partial_007_5",
+    name="FCNN",
     local_dir="ray_results",
     checkpoint_at_end=True,
     checkpoint_freq=1000,

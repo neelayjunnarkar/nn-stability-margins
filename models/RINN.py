@@ -36,12 +36,8 @@ class RINN(RecurrentNetwork, nn.Module):
             2 * action_space.shape[0] == num_outputs
         ), "Num outputs should be 2 * action dimension"
 
-        self.state_size = (
-            model_config["state_size"] if "state_size" in model_config else 16
-        )
-        self.nonlin_size = (
-            model_config["nonlin_size"] if "nonlin_size" in model_config else 128
-        )
+        self.state_size = model_config["state_size"] if "state_size" in model_config else 16
+        self.nonlin_size = model_config["nonlin_size"] if "nonlin_size" in model_config else 128
         self.input_size = obs_space.shape[0]
         self.output_size = action_space.shape[0]
 
@@ -70,9 +66,7 @@ class RINN(RecurrentNetwork, nn.Module):
         self.Duy_T = nn.Parameter(uniform(self.input_size, self.output_size))
 
         # self.deq = torchdeq.get_deq(f_solver="broyden", f_max_iter=30, b_max_iter=30)
-        self.deq = torchdeq.get_deq(
-            f_solver="fixed_point_iter", f_max_iter=30, b_max_iter=30
-        )
+        self.deq = torchdeq.get_deq(f_solver="fixed_point_iter", f_max_iter=30, b_max_iter=30)
 
         log_std_init = (
             model_config["log_std_init"]
@@ -90,9 +84,7 @@ class RINN(RecurrentNetwork, nn.Module):
             n_layers=model_config["baseline_n_layers"]
             if "baseline_n_layers" in model_config
             else 2,
-            size=model_config["baseline_size"]
-            if "baseline_size" in model_config
-            else 64,
+            size=model_config["baseline_size"] if "baseline_size" in model_config else 64,
         )
         self._cur_value = None
 
@@ -200,9 +192,7 @@ class RINN(RecurrentNetwork, nn.Module):
             if max_abs_row_sum > 0.999:
                 self.Dvw_T = nn.Parameter(self.Dvw_T * 0.99 / max_abs_row_sum)
                 new_max_abs_row_sum = torch.linalg.matrix_norm(self.Dvw_T, ord=1)
-                print(
-                    f"Reducing max abs row sum: {max_abs_row_sum} -> {new_max_abs_row_sum}"
-                )
+                print(f"Reducing max abs row sum: {max_abs_row_sum} -> {new_max_abs_row_sum}")
             # max_gain = 1.0
             # missing, unexpected = self.load_state_dict(
             #     {
@@ -219,6 +209,23 @@ class RINN(RecurrentNetwork, nn.Module):
             #     strict=False,
             # )
 
-        print(torch.max(torch.tensor([x.abs().max() for x in [self.A_T, self.Bw_T, self.By_T, 
-                                                            self.Cv_T, self.Dvw_T, self.Dvy_T, 
-                                                            self.Cu_T, self.Duw_T, self.Duy_T]])))
+        print(
+            torch.max(
+                torch.tensor(
+                    [
+                        x.abs().max()
+                        for x in [
+                            self.A_T,
+                            self.Bw_T,
+                            self.By_T,
+                            self.Cv_T,
+                            self.Dvw_T,
+                            self.Dvy_T,
+                            self.Cu_T,
+                            self.Duw_T,
+                            self.Duy_T,
+                        ]
+                    ]
+                )
+            )
+        )

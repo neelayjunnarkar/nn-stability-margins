@@ -19,9 +19,7 @@ class FullyConnectedNetwork(TorchModelV2, nn.Module):
             output_size=num_outputs,
             n_layers=model_config["n_layers"] if "n_layers" in model_config else 2,
             size=model_config["size"] if "size" in model_config else 128,
-            activation=model_config["activation"]
-            if "activation" in model_config
-            else "tanh",
+            activation=model_config["activation"] if "activation" in model_config else "tanh",
             output_activation=model_config["output_activation"]
             if "output_activation" in model_config
             else "identity",

@@ -54,7 +54,7 @@ class DissipativeSimplestRINN(RecurrentNetwork, nn.Module):
     #   trs_mode: fixed
     #   min_trs:  1.0
     #   backoff_factor: 1.1
-    #   mode: simplest    
+    #   mode: simplest
     def __init__(
         self,
         obs_space,
@@ -214,7 +214,7 @@ class DissipativeSimplestRINN(RecurrentNetwork, nn.Module):
             input_size=self.input_size,
             trs_mode=trs_mode,
             min_trs=min_trs,
-            backoff_factor=backoff_factor
+            backoff_factor=backoff_factor,
         )
 
         self.mode = model_config["mode"] if "mode" in model_config else "simplest"

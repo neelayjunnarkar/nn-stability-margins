@@ -35,21 +35,21 @@ if use_savio:
     N_CPUS = int(os.getenv("SLURM_CPUS_ON_NODE"))
     JOB_ID = os.getenv("SLURM_JOB_ID")
 else:
-    N_CPUS = 1  # test
-    # N_CPUS = multiprocessing.cpu_count() / 2
+    # N_CPUS = 1  # test
+    N_CPUS = multiprocessing.cpu_count() / 2
 n_tasks = 1
 n_workers_per_task = int(math.floor(N_CPUS / n_tasks)) - 1 - 1
 
 # Same dt must be used in controller models
-# dt = 0.01
-# env = InvertedPendulumEnv
-# env_config = {
-#     "observation": "partial",
-#     "normed": True,
-#     "dt": dt,
-#     "supply_rate": "stability",
-#     "disturbance_model": "occasional"
-# }
+dt = 0.01
+env = InvertedPendulumEnv
+env_config = {
+    "observation": "partial",
+    "normed": True,
+    "dt": dt,
+    "supply_rate": "l2_gain", # "stability",
+    "disturbance_model": "occasional"
+}
 # dt = 0.01
 # env = TimeDelayInvertedPendulumEnv  # 1.0
 # env_config = {
@@ -59,38 +59,38 @@ n_workers_per_task = int(math.floor(N_CPUS / n_tasks)) - 1 - 1
 #     "design_time_delay": 0.07,
 #     "time_delay_steps": 5,
 # }
-dt = 0.001 # 0.0001
-env = FlexibleArmEnv
-env_config = {
-    "observation": "full",
-    "normed": True,
-    "dt": dt,
-    "rollout_length": int(2.5/dt)-1, # 10000,
-    "supply_rate": "l2_gain",
-    "disturbance_model": "none",
-    "disturbance_design_model": "occasional",
-    "design_model": "rigid",
-}
+# dt = 0.001 # 0.0001
+# env = FlexibleArmEnv
+# env_config = {
+#     "observation": "full",
+#     "normed": True,
+#     "dt": dt,
+#     "rollout_length": int(2.5/dt)-1, # 10000,
+#     "supply_rate": "l2_gain",
+#     "disturbance_model": "none",
+#     "disturbance_design_model": "occasional",
+#     "design_model": "rigid",
+# }
 
 # Configure the algorithm.
 config = {
     "env": env,
     "env_config": env_config,
     "model": {
-        "custom_model": FullyConnectedNetwork,
-        "custom_model_config": {
-            "n_layers": 2,
-            "size": 19
-        }
+        # "custom_model": FullyConnectedNetwork,
+        # "custom_model_config": {
+        #     "n_layers": 2,
+        #     "size": 19
+        # }
         # "custom_model": ImplicitModel,
         # "custom_model_config": {"state_size": 16},
-        # "custom_model": RINN,
-        # "custom_model_config": {
-        #     "state_size": 2,
-        #     "nonlin_size": 16,
-        #     "dt": dt,
-        #     "log_std_init": np.log(1.0)
-        # }
+        "custom_model": RINN,
+        "custom_model_config": {
+            "state_size": 2,
+            "nonlin_size": 16,
+            "dt": dt,
+            "log_std_init": np.log(1.0)
+        }
         # "custom_model": DissipativeRINN,
         # "custom_model_config": {
         #     "state_size": 4,
@@ -136,7 +136,7 @@ config = {
         # }
         # "custom_model": DissipativeSimplestRINN,
         # "custom_model_config": {
-        #     "state_size": 4,
+        #     "state_size": 2,
         #     "nonlin_size": 16,
         #     "log_std_init": np.log(1.0),
         #     "dt": dt,
@@ -146,7 +146,7 @@ config = {
         #     # "mode": "simple",
         #     "mode": "thetahat",
         #     "trs_mode": "fixed",
-        #     "min_trs": 1.0,  # 1.5, # 1.73,
+        #     "min_trs": 1.5,  # 1.5, # 1.73,
         #     #             "P": np.array([[ 1.04159083e+02, -6.56387889e-01,  1.15737991e+01, -1.09562663e-02],
         #     #  [-6.56387889e-01,  2.00579719e-02, -1.73840137e-01, -7.29584950e-01],
         #     #  [ 1.15737991e+01, -1.73840137e-01,  2.42446125e+00,  8.20153731e+00],
@@ -166,7 +166,7 @@ config = {
         #     "lti_initializer": "dissipative_thetahat",
         #     "lti_initializer_kwargs": {
         #         "trs_mode": "fixed",
-        #         "min_trs": 1.0,  # 1.5, # 1.44
+        #         "min_trs": 1.5,  # 1.5, # 1.44
         #     },
         # },
         # "custom_model": LTIModel,
@@ -176,13 +176,13 @@ config = {
         #     "plant_config": env_config,
         #     "learn": True,
         #     "log_std_init": np.log(1.0),
-        #     "state_size": 4,
+        #     "state_size": 2,
         #     "trs_mode": "fixed",
-        #     "min_trs": 1.0,  # 1.5, # 1.44,
+        #     "min_trs": 1.5,  # 1.5, # 1.44,
         #     "lti_controller": "dissipative_thetahat",
         #     "lti_controller_kwargs": {
         #         "trs_mode": "fixed",
-        #         "min_trs": 1.0,  # 1.5 # 1.44
+        #         "min_trs": 1.5,  # 1.5 # 1.44
         #     },
         #     # "lti_controller": "lqr",
         #     # "lti_controller_kwargs": {
@@ -191,7 +191,7 @@ config = {
         #     # },
         # },
     },
-    # "lr": 1e-3,
+    "lr": 1e-3,
     "num_workers": n_workers_per_task,
     "framework": "torch",
     "num_gpus": 0,  # 1,
@@ -227,11 +227,11 @@ def name_creator(trial):
 
 ray.init()
 results = tune.run(
-    PPOTrainer,
-    # ProjectedPPOTrainer,
+    # PPOTrainer,
+    ProjectedPPOTrainer,
     config=config,
     stop={
-        "agent_timesteps_total": 10e3,
+        "agent_timesteps_total": 100e3,
     },
     verbose=1,
     trial_name_creator=name_creator,

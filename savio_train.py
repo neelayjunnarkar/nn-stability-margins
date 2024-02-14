@@ -46,15 +46,15 @@ n_workers_per_task = int(math.floor(N_CPUS / n_tasks)) - 1 - 1
 # assert T is not None
 
 # Same dt must be used in the controller model (RNN and RINN and DissipativeRINN)
-# dt = 0.01
-# env = InvertedPendulumEnv
-# env_config = {
-#     "observation": "partial",
-#     "normed": True,
-#     "dt": dt,
-#     "supply_rate": "stability",
-#     "disturbance_model": "occasional",
-# }
+dt = 0.01
+env = InvertedPendulumEnv
+env_config = {
+    "observation": "partial",
+    "normed": True,
+    "dt": dt,
+    "supply_rate": "l2_gain",  # "stability",
+    "disturbance_model": "occasional",
+}
 # dt = 0.01
 # env = TimeDelayInvertedPendulumEnv  # 1.0
 # env_config = {
@@ -81,50 +81,72 @@ n_workers_per_task = int(math.floor(N_CPUS / n_tasks)) - 1 - 1
 
 custom_model = None
 custom_model_config = None
-learning_rate = None
-if TASK_ID == 0 or TASK_ID == 1:
-    dt = 0.01
-    env = InvertedPendulumEnv
-    env_config = {
-        "observation": "partial",
-        "normed": True,
+learning_rate = 1e-3
+if TASK_ID == 0:
+    custom_model = DissipativeSimplestRINN
+    custom_model_config = {
+        "state_size": 2,
+        "nonlin_size": 16,
+        "log_std_init": np.log(1.0),
         "dt": dt,
-        "supply_rate": "stability",
-        "disturbance_model": "occasional",
+        "plant": env,
+        "plant_config": env_config,
+        "eps": 1e-3,
+        "mode": "thetahat",
+        "trs_mode": "fixed",
+        "min_trs": 1.5,
+        "lti_initializer": "dissipative_thetahat",
+        "lti_initializer_kwargs": {
+            "trs_mode": "fixed",
+            "min_trs": 1.5,
+        },
     }
+elif TASK_ID == 1:
+    custom_model = RINN
+    custom_model_config = {
+        "state_size": 2,
+        "nonlin_size": 16,
+        "dt": dt,
+        "log_std_init": np.log(1.0),
+    }
+elif TASK_ID == 2:
+    custom_model = LTIModel
+    custom_model_config = {
+        "dt": dt,
+        "plant": env,
+        "plant_config": env_config,
+        "learn": True,
+        "log_std_init": np.log(1.0),
+        "state_size": 2,
+        "trs_mode": "fixed",
+        "min_trs": 1.5,
+        "lti_controller": "dissipative_thetahat",
+        "lti_controller_kwargs": {
+            "trs_mode": "fixed",
+            "min_trs": 1.5,
+        },
+    }
+elif TASK_ID == 3:
+    custom_model = LTIModel
+    custom_model_config = {
+        "dt": dt,
+        "plant": env,
+        "plant_config": env_config,
+        "learn": True,
+        "log_std_init": np.log(1.0),
+        "state_size": 2,
+        "trs_mode": "fixed",
+        "min_trs": 1.5,
+        "lti_controller": "dissipative_thetahat",
+        "lti_controller_kwargs": {
+            "trs_mode": "fixed",
+            "min_trs": 1.5,
+        },
+    }
+    learning_rate = 1e-2
+elif TASK_ID == 4:
     custom_model = FullyConnectedNetwork
     custom_model_config = {"n_layers": 2, "size": 19}
-    if TASK_ID == 0:
-        print("Task 0")
-        learning_rate = 1e-3
-    elif TASK_ID == 1:
-        print("Task 1")
-        learning_rate = 1e-4
-    else:
-        raise ValueError(f"Task ID {TASK_ID} unexpected.")
-elif TASK_ID == 2 or TASK_ID == 3:
-    dt = 0.001  # 0.0001
-    env = FlexibleArmEnv
-    env_config = {
-        "observation": "full",
-        "normed": True,
-        "dt": dt,
-        "rollout_length": int(2.0 / dt) - 1,  # 10000,
-        "supply_rate": "l2_gain",
-        "disturbance_model": "none",
-        "disturbance_design_model": "occasional",
-        "design_model": "rigid",
-    }
-    custom_model = FullyConnectedNetwork
-    custom_model_config = {"n_layers": 2, "size": 19}
-    if TASK_ID == 2:
-        print("Task 2")
-        learning_rate = 1e-3
-    elif TASK_ID == 3:
-        print("Task 3")
-        learning_rate = 1e-4
-    else:
-        raise ValueError(f"Task ID {TASK_ID} unexpected.")
 else:
     raise ValueError(f"Task ID {TASK_ID} unexpected.")
 
@@ -176,15 +198,15 @@ def name_creator(trial):
 
 ray.init()
 results = tune.run(
-    PPOTrainer,
-    # ProjectedPPOTrainer,
+    # PPOTrainer,
+    ProjectedPPOTrainer,
     config=config,
     stop={
         "agent_timesteps_total": 6100e3,
     },
     verbose=1,
     trial_name_creator=name_creator,
-    name="FCNN",
+    name="InvPend_Partial_L2_Occas",
     local_dir="ray_results",
     checkpoint_at_end=True,
     checkpoint_freq=1000,

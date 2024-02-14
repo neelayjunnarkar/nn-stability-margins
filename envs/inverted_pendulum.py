@@ -79,12 +79,6 @@ class InvertedPendulumEnv(gym.Env):
         self.Dpyw = np.zeros((self.ny, self.nw), dtype=np.float32)
         # Dpyu is always 0
 
-        # Disturbance enters into control input
-        # self.nd = self.nu
-        # self.Bpd = self.Bpu.copy()
-        # self.Dpvd = np.zeros((self.nv, self.nd), dtype=np.float32)
-        # self.Dpyd = np.zeros((self.ny, self.nd), dtype=np.float32)
-
         assert "supply_rate" in env_config
         if env_config["supply_rate"] == "stability":
             print("Plant using stability construction for disturbance, performance output, and supply rate.")
@@ -122,9 +116,10 @@ class InvertedPendulumEnv(gym.Env):
             self.Dpeu = np.zeros((self.ne, self.nu), dtype=np.float32)
 
             gamma = 0.99
-            self.Xdd = gamma * np.eye(self.nd, dtype=np.float32)
+            alpha = 0.7
+            self.Xdd = alpha * gamma**2 * np.eye(self.nd, dtype=np.float32)
             self.Xde = np.zeros((self.nd, self.ne), dtype=np.float32)
-            self.Xee = -np.eye(self.ne, dtype=np.float32)
+            self.Xee = -alpha * np.eye(self.ne, dtype=np.float32)
         else:
             raise ValueError(f"Supply rate {env_config['supply_rate']} must be one of: 'stability'.")
 
@@ -250,7 +245,7 @@ class InvertedPendulumEnv(gym.Env):
         return self.get_obs()
 
     def get_obs(self):
-        return self.Cpy @ self.state  # TODO(Neelay): generalize
+        return self.Cpy @ self.state
 
     def get_params(self):
         return PlantParameters(

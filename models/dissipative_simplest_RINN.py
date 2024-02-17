@@ -158,15 +158,20 @@ class DissipativeSimplestRINN(RecurrentNetwork, nn.Module):
             lti_controller = lti_controller.np_to_torch(device=self.Lambda.device)
 
             self.A_T = nn.Parameter(lti_controller.Ak.t())
-            self.Bw_T = nn.Parameter(torch.zeros(self.nonlin_size, self.state_size))
+            # self.Bw_T = nn.Parameter(torch.zeros(self.nonlin_size, self.state_size))
+            self.Bw_T = nn.Parameter(uniform(self.nonlin_size, self.state_size))
             self.By_T = nn.Parameter(lti_controller.Bky.t())
 
-            self.Cv_T = nn.Parameter(torch.zeros(self.state_size, self.nonlin_size))
-            self.Dvw_T = nn.Parameter(torch.zeros((self.nonlin_size, self.nonlin_size)))
-            self.Dvy_T = nn.Parameter(torch.zeros(self.input_size, self.nonlin_size))
+            # self.Cv_T = nn.Parameter(torch.zeros(self.state_size, self.nonlin_size))
+            # self.Dvw_T = nn.Parameter(torch.zeros((self.nonlin_size, self.nonlin_size)))
+            # self.Dvy_T = nn.Parameter(torch.zeros(self.input_size, self.nonlin_size))
+            self.Cv_T = nn.Parameter(uniform(self.state_size, self.nonlin_size))
+            self.Dvw_T = nn.Parameter(uniform(self.nonlin_size, self.nonlin_size))
+            self.Dvy_T = nn.Parameter(uniform(self.input_size, self.nonlin_size))
 
             self.Cu_T = nn.Parameter(lti_controller.Cku.t())
-            self.Duw_T = nn.Parameter(torch.zeros(self.nonlin_size, self.output_size))
+            # self.Duw_T = nn.Parameter(torch.zeros(self.nonlin_size, self.output_size))
+            self.Duw_T = nn.Parameter(uniform(self.nonlin_size, self.output_size))
             self.Duy_T = nn.Parameter(lti_controller.Dkuy.t())
 
             if "P" in info and "P" not in model_config:

@@ -36,7 +36,7 @@ if use_savio:
     JOB_ID = os.getenv("SLURM_JOB_ID")
 else:
     # N_CPUS = 1  # test
-    N_CPUS = multiprocessing.cpu_count() / 2
+    N_CPUS = multiprocessing.cpu_count()
 n_tasks = 1
 n_workers_per_task = int(math.floor(N_CPUS / n_tasks)) - 1 - 1
 
@@ -84,13 +84,13 @@ config = {
         # }
         # "custom_model": ImplicitModel,
         # "custom_model_config": {"state_size": 16},
-        "custom_model": RINN,
-        "custom_model_config": {
-            "state_size": 2,
-            "nonlin_size": 16,
-            "dt": dt,
-            "log_std_init": np.log(1.0)
-        }
+        # "custom_model": RINN,
+        # "custom_model_config": {
+        #     "state_size": 2,
+        #     "nonlin_size": 16,
+        #     "dt": dt,
+        #     "log_std_init": np.log(1.0)
+        # }
         # "custom_model": DissipativeRINN,
         # "custom_model_config": {
         #     "state_size": 4,
@@ -134,41 +134,41 @@ config = {
         #     "project_delay": 1,
         #     "project_spacing": 1, # 10,
         # }
-        # "custom_model": DissipativeSimplestRINN,
-        # "custom_model_config": {
-        #     "state_size": 2,
-        #     "nonlin_size": 16,
-        #     "log_std_init": np.log(1.0),
-        #     "dt": dt,
-        #     "plant": env,
-        #     "plant_config": env_config,
-        #     "eps": 1e-3,
-        #     # "mode": "simple",
-        #     "mode": "thetahat",
-        #     "trs_mode": "fixed",
-        #     "min_trs": 1.5,  # 1.5, # 1.73,
-        #     #             "P": np.array([[ 1.04159083e+02, -6.56387889e-01,  1.15737991e+01, -1.09562663e-02],
-        #     #  [-6.56387889e-01,  2.00579719e-02, -1.73840137e-01, -7.29584950e-01],
-        #     #  [ 1.15737991e+01, -1.73840137e-01,  2.42446125e+00,  8.20153731e+00],
-        #     #  [-1.09562663e-02, -7.29584950e-01,  8.20153731e+00,  6.03135330e+01]]),
-        #     # "lti_initializer": "dissipative_theta",
-        #     # "lti_initializer_kwargs": {
-        #     #     "eps": 1e-3,
-        #     ## "P0": np.array([[ 1.04159083e+02, -6.56387889e-01,  1.15737991e+01, -1.09562663e-02],
-        #     ##     [-6.56387889e-01,  2.00579719e-02, -1.73840137e-01, -7.29584950e-01],
-        #     ##     [ 1.15737991e+01, -1.73840137e-01,  2.42446125e+00,  8.20153731e+00],
-        #     ##     [-1.09562663e-02, -7.29584950e-01,  8.20153731e+00,  6.03135330e+01]]),
-        #     # "P0": np.array([[ 0.4622, -0.0031,  0.1563, -0.0719],
-        #     #     [-0.0031,  0.0089, -0.0332, -0.0791],
-        #     #     [ 0.1563, -0.0332,  0.2260,  0.4052],
-        #     #     [-0.0719, -0.0791,  0.4052,  1.3935]])
-        #     # }
-        #     "lti_initializer": "dissipative_thetahat",
-        #     "lti_initializer_kwargs": {
-        #         "trs_mode": "fixed",
-        #         "min_trs": 1.5,  # 1.5, # 1.44
-        #     },
-        # },
+        "custom_model": DissipativeSimplestRINN,
+        "custom_model_config": {
+            "state_size": 2,
+            "nonlin_size": 16,
+            "log_std_init": np.log(1.0),
+            "dt": dt,
+            "plant": env,
+            "plant_config": env_config,
+            "eps": 1e-3,
+            # "mode": "simple",
+            "mode": "thetahat",
+            "trs_mode": "fixed",
+            "min_trs": 1.5,  # 1.5, # 1.73,
+            #             "P": np.array([[ 1.04159083e+02, -6.56387889e-01,  1.15737991e+01, -1.09562663e-02],
+            #  [-6.56387889e-01,  2.00579719e-02, -1.73840137e-01, -7.29584950e-01],
+            #  [ 1.15737991e+01, -1.73840137e-01,  2.42446125e+00,  8.20153731e+00],
+            #  [-1.09562663e-02, -7.29584950e-01,  8.20153731e+00,  6.03135330e+01]]),
+            # "lti_initializer": "dissipative_theta",
+            # "lti_initializer_kwargs": {
+            #     "eps": 1e-3,
+            ## "P0": np.array([[ 1.04159083e+02, -6.56387889e-01,  1.15737991e+01, -1.09562663e-02],
+            ##     [-6.56387889e-01,  2.00579719e-02, -1.73840137e-01, -7.29584950e-01],
+            ##     [ 1.15737991e+01, -1.73840137e-01,  2.42446125e+00,  8.20153731e+00],
+            ##     [-1.09562663e-02, -7.29584950e-01,  8.20153731e+00,  6.03135330e+01]]),
+            # "P0": np.array([[ 0.4622, -0.0031,  0.1563, -0.0719],
+            #     [-0.0031,  0.0089, -0.0332, -0.0791],
+            #     [ 0.1563, -0.0332,  0.2260,  0.4052],
+            #     [-0.0719, -0.0791,  0.4052,  1.3935]])
+            # }
+            "lti_initializer": "dissipative_thetahat",
+            "lti_initializer_kwargs": {
+                "trs_mode": "fixed",
+                "min_trs": 1.5,  # 1.5, # 1.44
+            },
+        },
         # "custom_model": LTIModel,
         # "custom_model_config": {
         #     "dt": dt,
@@ -231,7 +231,7 @@ results = tune.run(
     ProjectedPPOTrainer,
     config=config,
     stop={
-        "agent_timesteps_total": 100e3,
+        "agent_timesteps_total": 1000e3,
     },
     verbose=1,
     trial_name_creator=name_creator,

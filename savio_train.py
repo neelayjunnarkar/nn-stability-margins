@@ -82,6 +82,7 @@ env_config = {
 custom_model = None
 custom_model_config = None
 learning_rate = 1e-3
+trainer = ProjectedPPOTrainer
 if TASK_ID == 0:
     custom_model = DissipativeSimplestRINN
     custom_model_config = {
@@ -147,12 +148,14 @@ elif TASK_ID == 3:
 elif TASK_ID == 4:
     custom_model = FullyConnectedNetwork
     custom_model_config = {"n_layers": 2, "size": 19}
+    trainer = PPOTrainer
 else:
     raise ValueError(f"Task ID {TASK_ID} unexpected.")
 
 assert custom_model is not None
 assert custom_model_config is not None
 assert learning_rate is not None
+assert trainer is not None
 
 # Configure the algorithm.
 config = {
@@ -199,7 +202,8 @@ def name_creator(trial):
 ray.init()
 results = tune.run(
     # PPOTrainer,
-    ProjectedPPOTrainer,
+    # ProjectedPPOTrainer,
+    trainer,
     config=config,
     stop={
         "agent_timesteps_total": 6100e3,

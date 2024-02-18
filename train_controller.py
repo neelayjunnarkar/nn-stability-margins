@@ -41,15 +41,15 @@ n_tasks = 1
 n_workers_per_task = int(math.floor(N_CPUS / n_tasks)) - 1 - 1
 
 # Same dt must be used in controller models
-dt = 0.01
-env = InvertedPendulumEnv
-env_config = {
-    "observation": "partial",
-    "normed": True,
-    "dt": dt,
-    "supply_rate": "l2_gain", # "stability",
-    "disturbance_model": "occasional"
-}
+# dt = 0.01
+# env = InvertedPendulumEnv
+# env_config = {
+#     "observation": "partial",
+#     "normed": True,
+#     "dt": dt,
+#     "supply_rate": "l2_gain", # "stability",
+#     "disturbance_model": "occasional"
+# }
 # dt = 0.01
 # env = TimeDelayInvertedPendulumEnv  # 1.0
 # env_config = {
@@ -71,6 +71,18 @@ env_config = {
 #     "disturbance_design_model": "occasional",
 #     "design_model": "rigid",
 # }
+dt = 0.001
+env = FlexibleArmEnv
+env_config = {
+    "observation": "partial",
+    "normed": True,
+    "dt": dt,
+    "rollout_length": int(2.5 / dt) - 1,
+    "supply_rate": "l2_gain",
+    "disturbance_model": "none",
+    "disturbance_design_model": "occasional",
+    "design_model": "rigidplus",  # trs in [1, 2] seem kind of the same... Maybe use 1.5.
+}
 
 # Configure the algorithm.
 config = {
@@ -136,7 +148,7 @@ config = {
         # }
         "custom_model": DissipativeSimplestRINN,
         "custom_model_config": {
-            "state_size": 2,
+            "state_size": 4,
             "nonlin_size": 16,
             "log_std_init": np.log(1.0),
             "dt": dt,

@@ -85,7 +85,9 @@ class FlexibleArmEnv(gym.Env):
         if design_model == "flexible":
             self.design_model = self._build_true_model(self.observation, "flexible", self.disturbance_design_model, self.supply_rate)
         elif design_model == "rigid":
-            self.design_model = self._build_design_model(self.observation, self.disturbance_design_model, self.supply_rate)
+            self.design_model = self._build_rigid_design_model(self.observation, self.disturbance_design_model, self.supply_rate)
+        elif design_model == "rigidplus":
+            self.design_model = self._build_rigidplus_design_model(self.observation, self.disturbance_design_model, self.supply_rate)
         else:
             raise ValueError(f"Unexpected design model: {design_model}.")
 
@@ -275,12 +277,12 @@ class FlexibleArmEnv(gym.Env):
         Dpvw = np.zeros((nv, nw), dtype=np.float32)
         Dpvu = np.zeros((nv, nu), dtype=np.float32)
 
-        assert design_model in ["flexible", "rigid"]
+        assert design_model in ["flexible", "rigid", "rigidplus"]
         if observation == "full" and design_model == "flexible":
             # Observe full state
             ny = nx
             Cpy = np.eye(nx, dtype=np.float32)
-        elif observation == "full" and design_model == "rigid":
+        elif observation == "full" and (design_model == "rigid" or design_model == "rigidplus"):
             # Observe "full state" of rigid model, with sensors at top of pendulum (gives x + h, xdot + hdot)
             ny = 2
             Cpy = np.array([[1, 1, 0, 0], [0, 0, 1, 1]], dtype=np.float32)
@@ -288,7 +290,7 @@ class FlexibleArmEnv(gym.Env):
             # Observe x and h
             ny = 2
             Cpy = np.array([[1, 0, 0, 0], [0, 1, 0, 0]], dtype=np.float32)
-        elif observation == "partial" and design_model == "rigid":
+        elif observation == "partial" and (design_model == "rigid" or design_model == "rigidplus"):
             # Observe x + h
             ny = 1
             Cpy = np.array([[1, 1, 0, 0]], dtype=np.float32)
@@ -345,7 +347,7 @@ class FlexibleArmEnv(gym.Env):
         )
         # fmt: on
 
-    def _build_design_model(self, observation, disturbance_model, supply_rate):
+    def _build_rigid_design_model(self, observation, disturbance_model, supply_rate):
         nx = 2
         nw = 1  # Output size of uncertainty Deltap
         nd = None  # Disturbance size. Defined based on disturbance_model.
@@ -386,7 +388,7 @@ class FlexibleArmEnv(gym.Env):
         else:
             raise ValueError(f"Unexpected disturbance model: {disturbance_model}.")
 
-        if self.supply_rate == "stability":
+        if supply_rate == "stability":
             ne = nx
             Cpe = np.eye(nx, dtype=np.float32)
             Dpew = np.zeros((ne, nw), dtype=np.float32)
@@ -396,7 +398,7 @@ class FlexibleArmEnv(gym.Env):
             Xdd = np.zeros((nd, nd), dtype=np.float32)
             Xde = np.zeros((nd, ne), dtype=np.float32)
             Xee = np.zeros((ne, ne), dtype=np.float32)
-        elif self.supply_rate == "l2_gain":
+        elif supply_rate == "l2_gain":
             ne = nx
             Cpe = np.eye(nx, dtype=np.float32)
             Dpew = np.zeros((ne, nw), dtype=np.float32)
@@ -408,12 +410,67 @@ class FlexibleArmEnv(gym.Env):
             Xde = np.zeros((nd, ne), dtype=np.float32)
             Xee = -np.eye(ne, dtype=np.float32)
         else:
-            raise ValueError(f"Unexpected supply rate: {self.supply_rate}")
+            raise ValueError(f"Unexpected supply rate: {supply_rate}")
 
         MDeltapvv = np.zeros((nv, nv), dtype=np.float32)
         MDeltapvw = np.zeros((nv, nw), dtype=np.float32)
         MDeltapww = np.zeros((nw, nw), dtype=np.float32)
 
+        # fmt: off
+        return PlantParameters(
+            Ap, Bpw, Bpd, Bpu, Cpv, Dpvw, Dpvd, Dpvu, Cpe, Dpew, Dped, Dpeu, Cpy, Dpyw, Dpyd,
+            MDeltapvv, MDeltapvw, MDeltapww, Xdd, Xde, Xee
+        )
+        # fmt: on
+
+    def _build_rigidplus_design_model(self, observation, disturbance_model, supply_rate):
+        """
+        Build rigid model with additive uncertainty covering the difference between the rigid and flexible models.
+
+             d  |-> Delta -> W -|
+             |  |               |
+             v  |               v
+        u -> + ---------> Gr -> + -> y        
+        """
+
+        assert observation == "partial", "This model only supports partial observation"
+        assert disturbance_model == "occasional", "This model only supports disturbance"
+        assert supply_rate == "l2_gain", "This model only supports a supply rate for L2 gain"
+
+        # Combination of Gr and W:
+        Ap = np.array(
+            [[0, 0.5, 0, 0], [0, 0, 0, 0], [0, 0, -4.2236, 244.4], [0, 0, -244.4, -4.331]],
+            dtype=np.float32,
+        )
+        Bpw = np.array([[0], [0], [-0.04402], [-0.04373]], dtype=np.float32)
+        Bpd = np.array([[0], [1.667], [0], [0]], dtype=np.float32)
+        Bpu = np.array([[0], [1.667], [0], [0]], dtype=np.float32)
+
+        Cpv = np.zeros((1, 4), dtype=np.float32)
+        Dpvw = np.zeros((1, 1), dtype=np.float32)
+        Dpvd = np.ones((1, 1), dtype=np.float32)
+        Dpvu = np.ones((1, 1), dtype=np.float32)
+
+        Cpe = np.array([[1, 0, 0, 0], [0, 0.5, 0, 0]], dtype=np.float32)
+        Dpew = np.zeros((2, 1), dtype=np.float32)
+        Dped = np.zeros((2, 1), dtype=np.float32)
+        Dpeu = np.zeros((2, 1), dtype=np.float32)
+
+        Cpy = np.array([[1, 0, -0.04402, 0.04373]], dtype=np.float32)
+        Dpyw = np.array([[3.336e-10]], dtype=np.float32)
+        Dpyd = np.zeros((1, 1), dtype=np.float32)
+
+        MDeltapvv = np.array([[1]], dtype=np.float32)
+        MDeltapvw = np.array([[0]], dtype=np.float32)
+        MDeltapww = np.array([[-1]], dtype=np.float32)
+
+        gamma = 0.99 # L2 gain
+        alpha = 10 # Scale supply rate for better numerical results
+        Xdd = alpha * gamma**2 * np.eye(1, dtype=np.float32)
+        Xde = np.zeros((1, 2), dtype=np.float32)
+        Xee = alpha * -np.eye(2, dtype=np.float32)
+
+    
         # fmt: off
         return PlantParameters(
             Ap, Bpw, Bpd, Bpu, Cpv, Dpvw, Dpvd, Dpvu, Cpe, Dpew, Dped, Dpeu, Cpy, Dpyw, Dpyd,

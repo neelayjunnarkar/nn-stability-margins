@@ -46,15 +46,15 @@ n_workers_per_task = int(math.floor(N_CPUS / n_tasks)) - 1 - 1
 # assert T is not None
 
 # Same dt must be used in the controller model (RNN and RINN and DissipativeRINN)
-dt = 0.01
-env = InvertedPendulumEnv
-env_config = {
-    "observation": "partial",
-    "normed": True,
-    "dt": dt,
-    "supply_rate": "l2_gain",  # "stability",
-    "disturbance_model": "occasional",
-}
+# dt = 0.01
+# env = InvertedPendulumEnv
+# env_config = {
+#     "observation": "partial",
+#     "normed": True,
+#     "dt": dt,
+#     "supply_rate": "l2_gain",  # "stability",
+#     "disturbance_model": "occasional",
+# }
 # dt = 0.01
 # env = TimeDelayInvertedPendulumEnv  # 1.0
 # env_config = {
@@ -76,6 +76,18 @@ env_config = {
 #     "disturbance_design_model": "occasional",
 #     "design_model": "rigid",
 # }
+dt = 0.001
+env = FlexibleArmEnv
+env_config = {
+    "observation": "partial",
+    "normed": True,
+    "dt": dt,
+    "rollout_length": int(2 / dt) - 1,
+    "supply_rate": "l2_gain",
+    "disturbance_model": "none",
+    "disturbance_design_model": "occasional",
+    "design_model": "rigidplus",  # trs in [1, 2] seem kind of the same... Maybe use 1.5.
+}
 
 ## Model Config by Task
 
@@ -86,7 +98,7 @@ trainer = ProjectedPPOTrainer
 if TASK_ID == 0:
     custom_model = DissipativeSimplestRINN
     custom_model_config = {
-        "state_size": 2,
+        "state_size": 4,
         "nonlin_size": 16,
         "log_std_init": np.log(1.0),
         "dt": dt,
@@ -103,13 +115,25 @@ if TASK_ID == 0:
         },
     }
 elif TASK_ID == 1:
-    custom_model = RINN
+    custom_model = DissipativeSimplestRINN
     custom_model_config = {
-        "state_size": 2,
+        "state_size": 4,
         "nonlin_size": 16,
-        "dt": dt,
         "log_std_init": np.log(1.0),
+        "dt": dt,
+        "plant": env,
+        "plant_config": env_config,
+        "eps": 1e-3,
+        "mode": "thetahat",
+        "trs_mode": "fixed",
+        "min_trs": 1.5,
+        "lti_initializer": "dissipative_thetahat",
+        "lti_initializer_kwargs": {
+            "trs_mode": "fixed",
+            "min_trs": 1.5,
+        },
     }
+    learning_rate = 1e-2
 elif TASK_ID == 2:
     custom_model = LTIModel
     custom_model_config = {
@@ -118,7 +142,7 @@ elif TASK_ID == 2:
         "plant_config": env_config,
         "learn": True,
         "log_std_init": np.log(1.0),
-        "state_size": 2,
+        "state_size": 4,
         "trs_mode": "fixed",
         "min_trs": 1.5,
         "lti_controller": "dissipative_thetahat",
@@ -135,7 +159,7 @@ elif TASK_ID == 3:
         "plant_config": env_config,
         "learn": True,
         "log_std_init": np.log(1.0),
-        "state_size": 2,
+        "state_size": 4,
         "trs_mode": "fixed",
         "min_trs": 1.5,
         "lti_controller": "dissipative_thetahat",
@@ -145,10 +169,10 @@ elif TASK_ID == 3:
         },
     }
     learning_rate = 1e-2
-elif TASK_ID == 4:
-    custom_model = FullyConnectedNetwork
-    custom_model_config = {"n_layers": 2, "size": 19}
-    trainer = PPOTrainer
+# elif TASK_ID == 4:
+#     custom_model = FullyConnectedNetwork
+#     custom_model_config = {"n_layers": 2, "size": 19}
+#     trainer = PPOTrainer
 else:
     raise ValueError(f"Task ID {TASK_ID} unexpected.")
 
@@ -210,7 +234,7 @@ results = tune.run(
     },
     verbose=1,
     trial_name_creator=name_creator,
-    name="InvPend_Partial_L2_Occas",
+    name="FlexArm_RigidPlus",
     local_dir="ray_results",
     checkpoint_at_end=True,
     checkpoint_freq=1000,

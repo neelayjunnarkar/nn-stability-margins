@@ -227,8 +227,8 @@ class DissipativeSimplestRINN(RecurrentNetwork, nn.Module):
         self.oldtheta = None
 
         # Maybe want to always project
-        if lti_initializer is None:
-            self.project()
+        # if lti_initializer is None:
+        self.project()
 
     def project(self):
         """Modify parameters to ensure satisfaction of dissipativity condition."""
@@ -357,14 +357,27 @@ class DissipativeSimplestRINN(RecurrentNetwork, nn.Module):
         new_thetahat = self.thetahat_projector.project(thetahat)
         new_thetahat = new_thetahat.np_to_torch(device=self.A_T.device)
 
-        _new_theta, P = new_thetahat.torch_construct_theta(self.plant_params, self.eps)
+        new_theta, P = new_thetahat.torch_construct_theta(self.plant_params, self.eps)
 
         self.P = P
         self.Lambda = new_thetahat.Lambda
 
-        theta.Lambda = self.Lambda
-        new_new_theta = self.theta_projector.project(theta.torch_to_np(), to_numpy(self.P))
-        new_new_theta = new_new_theta.np_to_torch(device=self.A_T.device)
+        # TODO(Neelay) Figure out why this projection sometimes fails.
+        # Most prominent on rigidplus model of flexarm.
+
+        try:
+            theta.Lambda = self.Lambda
+            new_new_theta = self.theta_projector.project(theta.torch_to_np(), to_numpy(self.P))
+            new_new_theta = new_new_theta.np_to_torch(device=self.A_T.device)
+            print("Using second projection result for thetahat -> theta.")
+        except Exception as e:
+            is_diss, _, _ = self.theta_projector.is_dissipative(
+                new_theta.torch_to_np(), to_numpy(self.P)
+            )
+            if not is_diss:
+                raise Exception()
+            print("Using first projection result for thetahat -> theta.")
+            new_new_theta = new_theta
 
         new_k = new_new_theta
 

@@ -77,11 +77,11 @@ env_config = {
     "observation": "partial",
     "normed": True,
     "dt": dt,
-    "rollout_length": int(2.5 / dt) - 1,
+    "rollout_length": int(2 / dt) - 1,
     "supply_rate": "l2_gain",
-    "disturbance_model": "none",
+    "disturbance_model": "occasional",
     "disturbance_design_model": "occasional",
-    "design_model": "rigidplus",  # trs in [1, 2] seem kind of the same... Maybe use 1.5.
+    "design_model": "rigidplus",  # trs in [1, 2] seem kind of the same... Maybe use 1.2.
 }
 
 # Configure the algorithm.
@@ -158,7 +158,7 @@ config = {
             # "mode": "simple",
             "mode": "thetahat",
             "trs_mode": "fixed",
-            "min_trs": 1.5,  # 1.5, # 1.73,
+            "min_trs": 1.2,  # 1.5, # 1.73,
             #             "P": np.array([[ 1.04159083e+02, -6.56387889e-01,  1.15737991e+01, -1.09562663e-02],
             #  [-6.56387889e-01,  2.00579719e-02, -1.73840137e-01, -7.29584950e-01],
             #  [ 1.15737991e+01, -1.73840137e-01,  2.42446125e+00,  8.20153731e+00],
@@ -178,7 +178,7 @@ config = {
             "lti_initializer": "dissipative_thetahat",
             "lti_initializer_kwargs": {
                 "trs_mode": "fixed",
-                "min_trs": 1.5,  # 1.5, # 1.44
+                "min_trs": 1.2,  # 1.5, # 1.44
             },
         },
         # "custom_model": LTIModel,

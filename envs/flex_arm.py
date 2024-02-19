@@ -438,11 +438,42 @@ class FlexibleArmEnv(gym.Env):
         assert supply_rate == "l2_gain", "This model only supports a supply rate for L2 gain"
 
         # Combination of Gr and W:
+
+        # # Using balanced realization of interconnection with
+        # #        3.336e-10 s^2 + 2.489e-05 s + 0.9412
+        # # W(s) = ------------------------------------
+        # #              s^2 + 8.567 s + 5.974e04
+        # Ap = np.array(
+        #     [[0, 0.5, 0, 0], [0, 0, 0, 0], [0, 0, -4.2236, 244.4], [0, 0, -244.4, -4.331]],
+        #     dtype=np.float32,
+        # )
+        # Bpw = np.array([[0], [0], [-0.04402], [-0.04373]], dtype=np.float32)
+        # Bpd = np.array([[0], [1.667], [0], [0]], dtype=np.float32)
+        # Bpu = np.array([[0], [1.667], [0], [0]], dtype=np.float32)
+
+        # Cpv = np.zeros((1, 4), dtype=np.float32)
+        # Dpvw = np.zeros((1, 1), dtype=np.float32)
+        # Dpvd = np.ones((1, 1), dtype=np.float32)
+        # Dpvu = np.ones((1, 1), dtype=np.float32)
+
+        # Cpe = np.array([[1, 0, 0, 0], [0, 0.5, 0, 0]], dtype=np.float32)
+        # Dpew = np.zeros((2, 1), dtype=np.float32)
+        # Dped = np.zeros((2, 1), dtype=np.float32)
+        # Dpeu = np.zeros((2, 1), dtype=np.float32)
+
+        # Cpy = np.array([[1, 0, -0.04402, 0.04373]], dtype=np.float32)
+        # Dpyw = np.array([[3.336e-10]], dtype=np.float32)
+        # Dpyd = np.zeros((1, 1), dtype=np.float32)
+
+        # Using balanced realization of interconnection with
+        #                0.9412
+        # W(s) = ------------------------
+        #        s^2 + 8.567 s + 5.974e04
         Ap = np.array(
-            [[0, 0.5, 0, 0], [0, 0, 0, 0], [0, 0, -4.2236, 244.4], [0, 0, -244.4, -4.331]],
+            [[0, 0.5, 0, 0], [0, 0, 0, 0], [0, 0, -4.208, 244.4], [0, 0, -244.4, -4.359]],
             dtype=np.float32,
         )
-        Bpw = np.array([[0], [0], [-0.04402], [-0.04373]], dtype=np.float32)
+        Bpw = np.array([[0], [0], [-0.04388], [-0.04388]], dtype=np.float32)
         Bpd = np.array([[0], [1.667], [0], [0]], dtype=np.float32)
         Bpu = np.array([[0], [1.667], [0], [0]], dtype=np.float32)
 
@@ -456,8 +487,8 @@ class FlexibleArmEnv(gym.Env):
         Dped = np.zeros((2, 1), dtype=np.float32)
         Dpeu = np.zeros((2, 1), dtype=np.float32)
 
-        Cpy = np.array([[1, 0, -0.04402, 0.04373]], dtype=np.float32)
-        Dpyw = np.array([[3.336e-10]], dtype=np.float32)
+        Cpy = np.array([[1, 0, -0.04388, 0.04388]], dtype=np.float32)
+        Dpyw = np.zeros((1, 1), dtype=np.float32)
         Dpyd = np.zeros((1, 1), dtype=np.float32)
 
         MDeltapvv = np.array([[1]], dtype=np.float32)
@@ -465,7 +496,7 @@ class FlexibleArmEnv(gym.Env):
         MDeltapww = np.array([[-1]], dtype=np.float32)
 
         gamma = 0.99 # L2 gain
-        alpha = 10 # Scale supply rate for better numerical results
+        alpha = 1.6 # Scale supply rate for better numerical results
         Xdd = alpha * gamma**2 * np.eye(1, dtype=np.float32)
         Xde = np.zeros((1, 2), dtype=np.float32)
         Xee = alpha * -np.eye(2, dtype=np.float32)

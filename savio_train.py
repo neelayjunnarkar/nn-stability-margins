@@ -84,16 +84,16 @@ env_config = {
     "dt": dt,
     "rollout_length": int(2 / dt) - 1,
     "supply_rate": "l2_gain",
-    "disturbance_model": "none",
+    "disturbance_model": "occasional",
     "disturbance_design_model": "occasional",
-    "design_model": "rigidplus",  # trs in [1, 2] seem kind of the same... Maybe use 1.5.
+    "design_model": "rigidplus",  # trs in [1, 2] seem kind of the same... Maybe use 1.2.
 }
 
 ## Model Config by Task
 
 custom_model = None
 custom_model_config = None
-learning_rate = 1e-3
+learning_rate = None
 trainer = ProjectedPPOTrainer
 if TASK_ID == 0:
     custom_model = DissipativeSimplestRINN
@@ -107,13 +107,14 @@ if TASK_ID == 0:
         "eps": 1e-3,
         "mode": "thetahat",
         "trs_mode": "fixed",
-        "min_trs": 1.5,
+        "min_trs": 1.2,
         "lti_initializer": "dissipative_thetahat",
         "lti_initializer_kwargs": {
             "trs_mode": "fixed",
-            "min_trs": 1.5,
+            "min_trs": 1.2,
         },
     }
+    learning_rate = 5e-4
 elif TASK_ID == 1:
     custom_model = DissipativeSimplestRINN
     custom_model_config = {
@@ -126,31 +127,34 @@ elif TASK_ID == 1:
         "eps": 1e-3,
         "mode": "thetahat",
         "trs_mode": "fixed",
-        "min_trs": 1.5,
+        "min_trs": 1.2,
         "lti_initializer": "dissipative_thetahat",
         "lti_initializer_kwargs": {
             "trs_mode": "fixed",
-            "min_trs": 1.5,
+            "min_trs": 1.2,
         },
     }
-    learning_rate = 1e-2
+    learning_rate = 1e-3
 elif TASK_ID == 2:
-    custom_model = LTIModel
+    custom_model = DissipativeSimplestRINN
     custom_model_config = {
+        "state_size": 4,
+        "nonlin_size": 16,
+        "log_std_init": np.log(1.0),
         "dt": dt,
         "plant": env,
         "plant_config": env_config,
-        "learn": True,
-        "log_std_init": np.log(1.0),
-        "state_size": 4,
+        "eps": 1e-3,
+        "mode": "thetahat",
         "trs_mode": "fixed",
-        "min_trs": 1.5,
-        "lti_controller": "dissipative_thetahat",
-        "lti_controller_kwargs": {
+        "min_trs": 1.2,
+        "lti_initializer": "dissipative_thetahat",
+        "lti_initializer_kwargs": {
             "trs_mode": "fixed",
-            "min_trs": 1.5,
+            "min_trs": 1.2,
         },
     }
+    learning_rate = 2e-3
 elif TASK_ID == 3:
     custom_model = LTIModel
     custom_model_config = {
@@ -161,18 +165,43 @@ elif TASK_ID == 3:
         "log_std_init": np.log(1.0),
         "state_size": 4,
         "trs_mode": "fixed",
-        "min_trs": 1.5,
+        "min_trs": 1.2,
         "lti_controller": "dissipative_thetahat",
         "lti_controller_kwargs": {
             "trs_mode": "fixed",
-            "min_trs": 1.5,
+            "min_trs": 1.2,
         },
     }
-    learning_rate = 1e-2
-# elif TASK_ID == 4:
-#     custom_model = FullyConnectedNetwork
-#     custom_model_config = {"n_layers": 2, "size": 19}
-#     trainer = PPOTrainer
+    learning_rate = 1e-3
+elif TASK_ID == 4:
+    custom_model = FullyConnectedNetwork
+    custom_model_config = {"n_layers": 2, "size": 19}
+    trainer = PPOTrainer
+    learning_rate = 1e-4
+elif TASK_ID == 5:
+    custom_model = RINN
+    custom_model_config = {
+        "state_size": 4,
+        "nonlin_size": 16,
+        "log_std_init": np.log(1.0),
+        "dt": dt,
+        "plant": env,
+        "plant_config": env_config,
+        "eps": 1e-3,
+    }
+    learning_rate = 5e-4
+elif TASK_ID == 5:
+    custom_model = RINN
+    custom_model_config = {
+        "state_size": 4,
+        "nonlin_size": 16,
+        "log_std_init": np.log(1.0),
+        "dt": dt,
+        "plant": env,
+        "plant_config": env_config,
+        "eps": 1e-3,
+    }
+    learning_rate = 1e-3
 else:
     raise ValueError(f"Task ID {TASK_ID} unexpected.")
 

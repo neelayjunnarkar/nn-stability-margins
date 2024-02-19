@@ -269,7 +269,8 @@ class Projector:
             # Ordinarily only need Lambda PSD, but for the following well-posedness condition need it PD
             self.pproj_k.Lambda >> self.eps * np.eye(self.pproj_k.Lambda.shape[0]),
             # Well-posedness condition Lambda Dkvw + Dkvw^T Lambda - 2 Lambda < 0
-            pprojLambda @ vprojDkvw + vprojDkvw.T @ pprojLambda - 2 * pprojLambda << -self.eps * np.eye(pprojLambda.shape[0]),
+            pprojLambda @ vprojDkvw + vprojDkvw.T @ pprojLambda - 2 * pprojLambda
+            << -self.eps * np.eye(pprojLambda.shape[0]),
             # Dissipativity condition
             mat << 0,
         ]
@@ -323,9 +324,9 @@ class Projector:
         self.pprojP.value = P
 
         try:
-            t0 = time.perf_counter()
+            # t0 = time.perf_counter()
             self.proj_problem.solve(enforce_dpp=True, solver=solver, **kwargs)
-            t1 = time.perf_counter()
+            # t1 = time.perf_counter()
             # print(f"Projection solving took {t1-t0} seconds.")
         except Exception as e:
             print(f"Failed to solve: {e}")
@@ -402,7 +403,10 @@ class Projector:
             self.vcheckP >> self.eps * np.eye(self.vcheckP.shape[0]),
             self.vcheckLambda >> self.eps * np.eye(self.vcheckLambda.shape[0]),
             # Well-posedness condition Lambda Dkvw + Dkvw^T Lambda - 2 Lambda < 0
-            self.vcheckLambda @ pcheckDkvw + pcheckDkvw.T @ self.vcheckLambda - 2 * self.vcheckLambda << -self.eps * np.eye(self.vcheckLambda.shape[0]),
+            self.vcheckLambda @ pcheckDkvw
+            + pcheckDkvw.T @ self.vcheckLambda
+            - 2 * self.vcheckLambda
+            << -self.eps * np.eye(self.vcheckLambda.shape[0]),
             # Dissipativity condition
             mat << -self.vcheckEps,
             self.vcheckEps >= 0,

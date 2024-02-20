@@ -94,116 +94,40 @@ env_config = {
 custom_model = None
 custom_model_config = None
 learning_rate = None
-trainer = ProjectedPPOTrainer
+trainer = None
+
 if TASK_ID == 0:
-    custom_model = DissipativeSimplestRINN
-    custom_model_config = {
-        "state_size": 4,
-        "nonlin_size": 16,
-        "log_std_init": np.log(1.0),
-        "dt": dt,
-        "plant": env,
-        "plant_config": env_config,
-        "eps": 1e-3,
-        "mode": "thetahat",
-        "trs_mode": "fixed",
-        "min_trs": 1.2,
-        "lti_initializer": "dissipative_thetahat",
-        "lti_initializer_kwargs": {
-            "trs_mode": "fixed",
-            "min_trs": 1.2,
-        },
-    }
-    learning_rate = 5e-4
+    learning_rate = 5e-5
+    log_std_init = np.log(0.4)
 elif TASK_ID == 1:
-    custom_model = DissipativeSimplestRINN
-    custom_model_config = {
-        "state_size": 4,
-        "nonlin_size": 16,
-        "log_std_init": np.log(1.0),
-        "dt": dt,
-        "plant": env,
-        "plant_config": env_config,
-        "eps": 1e-3,
-        "mode": "thetahat",
-        "trs_mode": "fixed",
-        "min_trs": 1.2,
-        "lti_initializer": "dissipative_thetahat",
-        "lti_initializer_kwargs": {
-            "trs_mode": "fixed",
-            "min_trs": 1.2,
-        },
-    }
-    learning_rate = 1e-3
-elif TASK_ID == 2:
-    custom_model = DissipativeSimplestRINN
-    custom_model_config = {
-        "state_size": 4,
-        "nonlin_size": 16,
-        "log_std_init": np.log(1.0),
-        "dt": dt,
-        "plant": env,
-        "plant_config": env_config,
-        "eps": 1e-3,
-        "mode": "thetahat",
-        "trs_mode": "fixed",
-        "min_trs": 1.2,
-        "lti_initializer": "dissipative_thetahat",
-        "lti_initializer_kwargs": {
-            "trs_mode": "fixed",
-            "min_trs": 1.2,
-        },
-    }
-    learning_rate = 2e-3
-elif TASK_ID == 3:
-    custom_model = LTIModel
-    custom_model_config = {
-        "dt": dt,
-        "plant": env,
-        "plant_config": env_config,
-        "learn": True,
-        "log_std_init": np.log(1.0),
-        "state_size": 4,
-        "trs_mode": "fixed",
-        "min_trs": 1.2,
-        "lti_controller": "dissipative_thetahat",
-        "lti_controller_kwargs": {
-            "trs_mode": "fixed",
-            "min_trs": 1.2,
-        },
-    }
-    learning_rate = 1e-3
-elif TASK_ID == 4:
-    custom_model = FullyConnectedNetwork
-    custom_model_config = {"n_layers": 2, "size": 19}
-    trainer = PPOTrainer
     learning_rate = 1e-4
-elif TASK_ID == 5:
-    custom_model = RINN
-    custom_model_config = {
-        "state_size": 4,
-        "nonlin_size": 16,
-        "log_std_init": np.log(1.0),
-        "dt": dt,
-        "plant": env,
-        "plant_config": env_config,
-        "eps": 1e-3,
-    }
-    learning_rate = 5e-4
-elif TASK_ID == 5:
-    custom_model = RINN
-    custom_model_config = {
-        "state_size": 4,
-        "nonlin_size": 16,
-        "log_std_init": np.log(1.0),
-        "dt": dt,
-        "plant": env,
-        "plant_config": env_config,
-        "eps": 1e-3,
-    }
+    log_std_init = np.log(0.4)
+elif TASK_ID == 2:
     learning_rate = 1e-3
+    log_std_init = np.log(0.4)
+elif TASK_ID == 3:
+    learning_rate = 5e-5
+    log_std_init = np.log(1.0)
+elif TASK_ID == 4:
+    learning_rate = 1e-4
+    log_std_init = np.log(1.0)
+elif TASK_ID == 5:
+    learning_rate = 1e-3
+    log_std_init = np.log(1.0)
 else:
     raise ValueError(f"Task ID {TASK_ID} unexpected.")
+
+custom_model = RINN
+custom_model_config = {
+    "state_size": 4,
+    "nonlin_size": 16,
+    "log_std_init": log_std_init,
+    "dt": dt,
+    "plant": env,
+    "plant_config": env_config,
+    "eps": 1e-3,
+}
+trainer = ProjectedPPOTrainer
 
 assert custom_model is not None
 assert custom_model_config is not None
@@ -263,7 +187,7 @@ results = tune.run(
     },
     verbose=1,
     trial_name_creator=name_creator,
-    name="FlexArm_RigidPlus",
+    name="FlexArm_Occas_Occas_RigidPlus",
     local_dir="ray_results",
     checkpoint_at_end=True,
     checkpoint_freq=1000,

@@ -42,6 +42,20 @@ class FlexibleArmEnv(gym.Env):
         else:
             self.time_max = 1000  # 0.1 seconds with dt = 0.0001
 
+        # Used to scale robustness in rigidplus, with MDeltap = [alpha, 0; 0, -1]
+        # Only used in rigidplus
+        if "delta_alpha" in env_config:
+            delta_alpha = env_config["delta_alpha"]
+        else:
+            delta_alpha = 1.0
+
+        # Used to scale supply rate in rigidplus
+        # Only used in rigidplus
+        if "supplyrate_scale" in env_config:
+            supplyrate_scale = env_config["supplyrate_scale"]
+        else:
+            supplyrate_scale = 1.0
+
         self.mb = 1  # Mass of base (Kg)
         self.mt = 0.1  # Mass of tip (Kg)
         self.L = 1  # Length of link (m)
@@ -87,7 +101,7 @@ class FlexibleArmEnv(gym.Env):
         elif design_model == "rigid":
             self.design_model = self._build_rigid_design_model(self.observation, self.disturbance_design_model, self.supply_rate)
         elif design_model == "rigidplus":
-            self.design_model = self._build_rigidplus_design_model(self.observation, self.disturbance_design_model, self.supply_rate)
+            self.design_model = self._build_rigidplus_design_model(self.observation, self.disturbance_design_model, self.supply_rate, delta_alpha, supplyrate_scale)
         else:
             raise ValueError(f"Unexpected design model: {design_model}.")
 
@@ -423,7 +437,7 @@ class FlexibleArmEnv(gym.Env):
         )
         # fmt: on
 
-    def _build_rigidplus_design_model(self, observation, disturbance_model, supply_rate):
+    def _build_rigidplus_design_model(self, observation, disturbance_model, supply_rate, delta_alpha, supplyrate_scale):
         """
         Build rigid model with additive uncertainty covering the difference between the rigid and flexible models.
 
@@ -491,12 +505,13 @@ class FlexibleArmEnv(gym.Env):
         Dpyw = np.zeros((1, 1), dtype=np.float32)
         Dpyd = np.zeros((1, 1), dtype=np.float32)
 
-        MDeltapvv = np.array([[1]], dtype=np.float32)
+        assert delta_alpha >= 0.0 and delta_alpha <= 1.0
+        MDeltapvv = delta_alpha * np.array([[1]], dtype=np.float32)
         MDeltapvw = np.array([[0]], dtype=np.float32)
         MDeltapww = np.array([[-1]], dtype=np.float32)
 
         gamma = 0.99 # L2 gain
-        alpha = 1.6 # Scale supply rate for better numerical results
+        alpha = supplyrate_scale # 1.6 # Scale supply rate for better numerical results
         Xdd = alpha * gamma**2 * np.eye(1, dtype=np.float32)
         Xde = np.zeros((1, 2), dtype=np.float32)
         Xee = alpha * -np.eye(2, dtype=np.float32)

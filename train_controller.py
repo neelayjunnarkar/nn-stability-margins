@@ -82,6 +82,8 @@ env_config = {
     "disturbance_model": "occasional",
     "disturbance_design_model": "occasional",
     "design_model": "rigidplus",  # trs in [1, 2] seem kind of the same... Maybe use 1.2.
+    "delta_alpha": 1.0,
+    "supplyrate_scale": 1.6,
 }
 
 # Configure the algorithm.
@@ -122,16 +124,16 @@ config = {
         #         "backoff_factor": 1.1,
         #     }
         # }
-        # "custom_model": RINN,
-        # "custom_model_config": {
-        #     "state_size": 4,
-        #     "nonlin_size": 16,
-        #     "log_std_init": np.log(1.0),
-        #     "dt": dt,
-        #     "plant": env,
-        #     "plant_config": env_config,
-        #     "eps": 1e-3,
-        # }
+        "custom_model": RINN,
+        "custom_model_config": {
+            "state_size": 4,
+            "nonlin_size": 16,
+            "log_std_init": np.log(1.0),
+            "dt": dt,
+            "plant": env,
+            "plant_config": env_config,
+            "eps": 1e-3,
+        },
         # "custom_model": DissipativeThetaRINN,
         # "custom_model_config": {
         #     "state_size": 2,
@@ -146,41 +148,25 @@ config = {
         #     "project_delay": 1,
         #     "project_spacing": 1, # 10,
         # }
-        "custom_model": DissipativeSimplestRINN,
-        "custom_model_config": {
-            "state_size": 4,
-            "nonlin_size": 16,
-            "log_std_init": np.log(1.0),
-            "dt": dt,
-            "plant": env,
-            "plant_config": env_config,
-            "eps": 1e-3,
-            # "mode": "simple",
-            "mode": "thetahat",
-            "trs_mode": "fixed",
-            "min_trs": 1.2,  # 1.5, # 1.73,
-            #             "P": np.array([[ 1.04159083e+02, -6.56387889e-01,  1.15737991e+01, -1.09562663e-02],
-            #  [-6.56387889e-01,  2.00579719e-02, -1.73840137e-01, -7.29584950e-01],
-            #  [ 1.15737991e+01, -1.73840137e-01,  2.42446125e+00,  8.20153731e+00],
-            #  [-1.09562663e-02, -7.29584950e-01,  8.20153731e+00,  6.03135330e+01]]),
-            # "lti_initializer": "dissipative_theta",
-            # "lti_initializer_kwargs": {
-            #     "eps": 1e-3,
-            ## "P0": np.array([[ 1.04159083e+02, -6.56387889e-01,  1.15737991e+01, -1.09562663e-02],
-            ##     [-6.56387889e-01,  2.00579719e-02, -1.73840137e-01, -7.29584950e-01],
-            ##     [ 1.15737991e+01, -1.73840137e-01,  2.42446125e+00,  8.20153731e+00],
-            ##     [-1.09562663e-02, -7.29584950e-01,  8.20153731e+00,  6.03135330e+01]]),
-            # "P0": np.array([[ 0.4622, -0.0031,  0.1563, -0.0719],
-            #     [-0.0031,  0.0089, -0.0332, -0.0791],
-            #     [ 0.1563, -0.0332,  0.2260,  0.4052],
-            #     [-0.0719, -0.0791,  0.4052,  1.3935]])
-            # }
-            "lti_initializer": "dissipative_thetahat",
-            "lti_initializer_kwargs": {
-                "trs_mode": "fixed",
-                "min_trs": 1.2,  # 1.5, # 1.44
-            },
-        },
+        # "custom_model": DissipativeSimplestRINN,
+        # "custom_model_config": {
+        #     "state_size": 4,
+        #     "nonlin_size": 16,
+        #     "log_std_init": np.log(1.0),
+        #     "dt": dt,
+        #     "plant": env,
+        #     "plant_config": env_config,
+        #     "eps": 1e-3,
+        #     # "mode": "simple",
+        #     "mode": "thetahat",
+        #     "trs_mode": "fixed",
+        #     "min_trs": 1.2,  # 1.5, # 1.73,
+        #     "lti_initializer": "dissipative_thetahat",
+        #     "lti_initializer_kwargs": {
+        #         "trs_mode": "fixed",
+        #         "min_trs": 1.2,  # 1.5, # 1.44
+        #     },
+        # },
         # "custom_model": LTIModel,
         # "custom_model_config": {
         #     "dt": dt,
@@ -188,13 +174,13 @@ config = {
         #     "plant_config": env_config,
         #     "learn": True,
         #     "log_std_init": np.log(1.0),
-        #     "state_size": 2,
+        #     "state_size": 4,
         #     "trs_mode": "fixed",
-        #     "min_trs": 1.5,  # 1.5, # 1.44,
+        #     "min_trs": 1.2,  # 1.5, # 1.44,
         #     "lti_controller": "dissipative_thetahat",
         #     "lti_controller_kwargs": {
         #         "trs_mode": "fixed",
-        #         "min_trs": 1.5,  # 1.5 # 1.44
+        #         "min_trs": 1.2,  # 1.5 # 1.44
         #     },
         #     # "lti_controller": "lqr",
         #     # "lti_controller_kwargs": {
@@ -203,7 +189,13 @@ config = {
         #     # },
         # },
     },
+    ## Testing changes to training parameters
+    "sgd_minibatch_size": 2048,
+    "train_batch_size": 20480,
     "lr": 1e-3,
+    "num_envs_per_worker": 10,
+    ## End test
+    "seed": 0,
     "num_workers": n_workers_per_task,
     "framework": "torch",
     "num_gpus": 0,  # 1,

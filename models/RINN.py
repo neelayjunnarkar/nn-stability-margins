@@ -209,23 +209,23 @@ class RINN(RecurrentNetwork, nn.Module):
             #     strict=False,
             # )
 
-        print(
-            torch.max(
-                torch.tensor(
-                    [
-                        x.abs().max()
-                        for x in [
-                            self.A_T,
-                            self.Bw_T,
-                            self.By_T,
-                            self.Cv_T,
-                            self.Dvw_T,
-                            self.Dvy_T,
-                            self.Cu_T,
-                            self.Duw_T,
-                            self.Duy_T,
-                        ]
-                    ]
-                )
-            )
-        )
+        # print(
+        #     torch.max(
+        #         torch.tensor(
+        #             [
+        #                 x.abs().max()
+        #                 for x in [
+        #                     self.A_T,
+        #                     self.Bw_T,
+        #                     self.By_T,
+        #                     self.Cv_T,
+        #                     self.Dvw_T,
+        #                     self.Dvy_T,
+        #                     self.Cu_T,
+        #                     self.Duw_T,
+        #                     self.Duy_T,
+        #                 ]
+        #             ]
+        #         )
+        #     )
+        # )

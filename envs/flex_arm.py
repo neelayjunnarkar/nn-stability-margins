@@ -155,8 +155,8 @@ class FlexibleArmEnv(gym.Env):
         # TODO(Neelay): this nonlin_size parameter likely only works when nv = nw. Fix.
         self.nonlin_size = self.nv
 
-        self.max_reward = 2.0
-        # self.max_reward = 1.0
+        # self.max_reward = 2.0
+        self.max_reward = 1.0
 
         self.seed(env_config["seed"] if "seed" in env_config else None)
 
@@ -210,7 +210,7 @@ class FlexibleArmEnv(gym.Env):
         # Reward for small state and small control
         reward_state = np.exp(-(np.linalg.norm(self.state) ** 2))
         reward_control = np.exp(-(np.linalg.norm(u) ** 2))
-        reward = reward_state + reward_control
+        reward = reward_control
 
         # reward_state = np.linalg.norm(self.state_space.high)**2 - np.linalg.norm(self.state)**2
         # reward_state = 0.5 * reward_state / (np.linalg.norm(self.state_space.high)**2)
@@ -420,7 +420,7 @@ class FlexibleArmEnv(gym.Env):
             Dpeu = np.zeros((ne, nu), dtype=np.float32)
 
             gamma = 0.99
-            Xdd = gamma * np.eye(nd, dtype=np.float32)
+            Xdd = gamma**2 * np.eye(nd, dtype=np.float32)
             Xde = np.zeros((nd, ne), dtype=np.float32)
             Xee = -np.eye(ne, dtype=np.float32)
         else:
@@ -505,10 +505,37 @@ class FlexibleArmEnv(gym.Env):
         Dpyw = np.zeros((1, 1), dtype=np.float32)
         Dpyd = np.zeros((1, 1), dtype=np.float32)
 
+        # # Using unbalanced realization of interconnection with
+        # #                0.9412
+        # # W(s) = ------------------------
+        # #        s^2 + 8.567 s + 5.974e04
+        # Ap = np.array(
+        #     [[0, 1, 0, 0], [0, 0, 0, 0], [0, 0, -8.567, -233.4], [0, 0, 256, 0]],
+        #     dtype=np.float32,
+        # )
+        # Bpw = np.array([[0], [0], [0.0625], [0]], dtype=np.float32)
+        # Bpd = np.array([[0], [0.8333], [0], [0]], dtype=np.float32)
+        # Bpu = np.array([[0], [0.8333], [0], [0]], dtype=np.float32)
+
+        # Cpv = np.zeros((1, 4), dtype=np.float32)
+        # Dpvw = np.zeros((1, 1), dtype=np.float32)
+        # Dpvd = np.ones((1, 1), dtype=np.float32)
+        # Dpvu = np.ones((1, 1), dtype=np.float32)
+
+        # Cpe = np.array([[1, 0, 0, 0], [0, 1, 0, 0]], dtype=np.float32)
+        # Dpew = np.zeros((2, 1), dtype=np.float32)
+        # Dped = np.zeros((2, 1), dtype=np.float32)
+        # Dpeu = np.zeros((2, 1), dtype=np.float32)
+
+        # Cpy = np.array([[1, 0, 0, 0.05883]], dtype=np.float32)
+        # Dpyw = np.zeros((1, 1), dtype=np.float32)
+        # Dpyd = np.zeros((1, 1), dtype=np.float32)
+
         assert delta_alpha >= 0.0 and delta_alpha <= 1.0
-        MDeltapvv = delta_alpha * np.array([[1]], dtype=np.float32)
+        mdelta_scale = 1
+        MDeltapvv = mdelta_scale * delta_alpha * np.array([[1]], dtype=np.float32)
         MDeltapvw = np.array([[0]], dtype=np.float32)
-        MDeltapww = np.array([[-1]], dtype=np.float32)
+        MDeltapww = mdelta_scale * np.array([[-1]], dtype=np.float32)
 
         gamma = 0.99 # L2 gain
         alpha = supplyrate_scale # 1.6 # Scale supply rate for better numerical results

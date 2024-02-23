@@ -26,6 +26,7 @@ from trainers import ProjectedPPOTrainer
 N_CPUS = int(os.getenv("SLURM_CPUS_ON_NODE"))
 JOB_ID = os.getenv("SLURM_JOB_ID")
 TASK_ID = int(os.getenv("SLURM_ARRAY_TASK_ID"))
+SEED = int(os.getenv("SEED"))
 
 n_tasks = 1
 n_workers_per_task = int(math.floor(N_CPUS / n_tasks)) - 1 - 1
@@ -87,6 +88,8 @@ env_config = {
     "disturbance_model": "occasional",
     "disturbance_design_model": "occasional",
     "design_model": "rigidplus",  # trs in [1, 2] seem kind of the same... Maybe use 1.2.
+    "delta_alpha": 1.0,
+    "supplyrate_scale": 1.6,
 }
 
 ## Model Config by Task
@@ -94,28 +97,24 @@ env_config = {
 custom_model = None
 custom_model_config = None
 learning_rate = None
+sgd_minibatch_size = None
+train_batch_size = None
 trainer = None
+log_std_init = np.log(1.0)
 
-if TASK_ID == 0:
-    learning_rate = 5e-5
-    log_std_init = np.log(0.4)
-elif TASK_ID == 1:
-    learning_rate = 1e-4
-    log_std_init = np.log(0.4)
-elif TASK_ID == 2:
-    learning_rate = 1e-3
-    log_std_init = np.log(0.4)
-elif TASK_ID == 3:
-    learning_rate = 5e-5
-    log_std_init = np.log(1.0)
-elif TASK_ID == 4:
-    learning_rate = 1e-4
-    log_std_init = np.log(1.0)
-elif TASK_ID == 5:
-    learning_rate = 1e-3
-    log_std_init = np.log(1.0)
-else:
-    raise ValueError(f"Task ID {TASK_ID} unexpected.")
+learning_rates = 9 * [5e-5] + 9 * [1e-4] + 9 * [2e-4]
+assert len(learning_rates) == 27
+sgd_minibatch_sizes = 9 * [512, 1024, 2048]
+assert len(sgd_minibatch_sizes) == 27
+train_batch_sizes = 3 * (3 * [5120] + 3 * [10240] + 3 * [20480])
+assert len(train_batch_sizes) == 27
+
+assert TASK_ID >= 0 and TASK_ID <= 26
+learning_rate = learning_rates[TASK_ID]
+sgd_minibatch_size = sgd_minibatch_sizes[TASK_ID]
+train_batch_size = train_batch_sizes[TASK_ID]
+
+assert log_std_init is not None
 
 custom_model = RINN
 custom_model_config = {
@@ -132,7 +131,10 @@ trainer = ProjectedPPOTrainer
 assert custom_model is not None
 assert custom_model_config is not None
 assert learning_rate is not None
+assert sgd_minibatch_size is not None
+assert train_batch_size is not None
 assert trainer is not None
+
 
 # Configure the algorithm.
 config = {
@@ -142,7 +144,11 @@ config = {
         "custom_model": custom_model,
         "custom_model_config": custom_model_config,
     },
+    "sgd_minibatch_size": sgd_minibatch_size,
+    "train_batch_size": train_batch_size,
     "lr": learning_rate,
+    "seed": SEED,
+    "num_envs_per_worker": 10,
     "num_workers": n_workers_per_task,
     "framework": "torch",
     "num_gpus": 0,  # 1,
@@ -178,8 +184,6 @@ def name_creator(trial):
 
 ray.init()
 results = tune.run(
-    # PPOTrainer,
-    # ProjectedPPOTrainer,
     trainer,
     config=config,
     stop={

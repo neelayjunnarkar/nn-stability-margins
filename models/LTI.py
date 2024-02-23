@@ -12,6 +12,19 @@ from utils import build_mlp, from_numpy, to_numpy
 from variable_structs import ControllerLTIThetaParameters
 
 
+def print_norms(X, name):
+    print(
+        "{}: largest gain: {:0.3f}, 1: {:0.3f}, 2: {:0.3f}, inf: {:0.3f}, fro: {:0.3f}".format(
+            name,
+            torch.max(torch.abs(X)),
+            torch.linalg.norm(X, 1),
+            torch.linalg.norm(X, 2),
+            torch.linalg.norm(X, np.inf),
+            torch.linalg.norm(X, "fro"),
+        )
+    )
+
+
 class LTIModel(RecurrentNetwork, nn.Module):
     """
     An LTI system of the following form:
@@ -142,6 +155,8 @@ class LTIModel(RecurrentNetwork, nn.Module):
             min_trs,
         )
 
+        self.oldtheta = None
+
     def project(self):
         """Modify parameters to ensure satisfaction of dissipativity condition."""
         if not self.learn:
@@ -160,6 +175,17 @@ class LTIModel(RecurrentNetwork, nn.Module):
             else:
                 self.enforce_dissipativity()
 
+        # fmt: off
+        theta = torch.vstack((
+            torch.hstack((self.A_T.t(),  self.By_T.t())),
+            torch.hstack((self.Cu_T.t(), self.Duy_T.t()))
+        ))
+        # fmt: on
+        print_norms(theta, "theta")
+        if self.oldtheta is not None:
+            print_norms(theta - self.oldtheta, "theta - oldtheta")
+        self.oldtheta = theta.detach().clone()
+
     def enforce_dissipativity(self):
         """Converts current theta, P, Lambda to thetahat and projects to dissipative set."""
         assert self.learn
@@ -173,11 +199,16 @@ class LTIModel(RecurrentNetwork, nn.Module):
         new_thetahat = self.thethat_projector.project(thetahat)
         new_thetahat = new_thetahat.np_to_torch(device=self.A_T.device)
 
-        _new_theta, P = new_thetahat.torch_construct_theta(self.plant_params)
+        new_theta, P = new_thetahat.torch_construct_theta(self.plant_params)
         self.P = P
 
-        new_new_theta = self.theta_projector.project(theta.torch_to_np(), to_numpy(self.P))
-        new_new_theta = new_new_theta.np_to_torch(device=self.A_T.device)
+        try:
+            new_new_theta = self.theta_projector.project(theta.torch_to_np(), to_numpy(self.P))
+            new_new_theta = new_new_theta.np_to_torch(device=self.A_T.device)
+            print("Using second projection result for thetahat -> theta.")
+        except Exception as _e:
+            print("Using first projection result for thetahat -> theta.")
+            new_new_theta = new_theta
 
         new_k = new_new_theta
 

@@ -295,10 +295,7 @@ class DissipativeSimplestRINN(RecurrentNetwork, nn.Module):
         # print_norms(self.Duy_T.t(), "Dkuy ")
         print_norms(theta, "theta")
         if self.oldtheta is not None:
-            print_norms(
-                theta - self.oldtheta,
-                f"theta - oldtheta: {torch.allclose(theta, self.oldtheta)}",
-            )
+            print_norms(theta - self.oldtheta, "theta - oldtheta")
         self.oldtheta = theta.detach().clone()
 
     def enforce_dissipativity(self):
@@ -370,12 +367,7 @@ class DissipativeSimplestRINN(RecurrentNetwork, nn.Module):
             new_new_theta = self.theta_projector.project(theta.torch_to_np(), to_numpy(self.P))
             new_new_theta = new_new_theta.np_to_torch(device=self.A_T.device)
             print("Using second projection result for thetahat -> theta.")
-        except Exception as e:
-            is_diss, _, _ = self.theta_projector.is_dissipative(
-                new_theta.torch_to_np(), to_numpy(self.P)
-            )
-            if not is_diss:
-                raise Exception()
+        except Exception as _e:
             print("Using first projection result for thetahat -> theta.")
             new_new_theta = new_theta
 

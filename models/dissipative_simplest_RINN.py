@@ -158,20 +158,20 @@ class DissipativeSimplestRINN(RecurrentNetwork, nn.Module):
             lti_controller = lti_controller.np_to_torch(device=self.Lambda.device)
 
             self.A_T = nn.Parameter(lti_controller.Ak.t())
-            # self.Bw_T = nn.Parameter(torch.zeros(self.nonlin_size, self.state_size))
-            self.Bw_T = nn.Parameter(uniform(self.nonlin_size, self.state_size))
+            self.Bw_T = nn.Parameter(torch.zeros(self.nonlin_size, self.state_size))
+            # self.Bw_T = nn.Parameter(uniform(self.nonlin_size, self.state_size))
             self.By_T = nn.Parameter(lti_controller.Bky.t())
 
-            # self.Cv_T = nn.Parameter(torch.zeros(self.state_size, self.nonlin_size))
-            # self.Dvw_T = nn.Parameter(torch.zeros((self.nonlin_size, self.nonlin_size)))
-            # self.Dvy_T = nn.Parameter(torch.zeros(self.input_size, self.nonlin_size))
-            self.Cv_T = nn.Parameter(uniform(self.state_size, self.nonlin_size))
-            self.Dvw_T = nn.Parameter(uniform(self.nonlin_size, self.nonlin_size))
-            self.Dvy_T = nn.Parameter(uniform(self.input_size, self.nonlin_size))
+            self.Cv_T = nn.Parameter(torch.zeros(self.state_size, self.nonlin_size))
+            self.Dvw_T = nn.Parameter(torch.zeros((self.nonlin_size, self.nonlin_size)))
+            self.Dvy_T = nn.Parameter(torch.zeros(self.input_size, self.nonlin_size))
+            # self.Cv_T = nn.Parameter(uniform(self.state_size, self.nonlin_size))
+            # self.Dvw_T = nn.Parameter(uniform(self.nonlin_size, self.nonlin_size))
+            # self.Dvy_T = nn.Parameter(uniform(self.input_size, self.nonlin_size))
 
             self.Cu_T = nn.Parameter(lti_controller.Cku.t())
-            # self.Duw_T = nn.Parameter(torch.zeros(self.nonlin_size, self.output_size))
-            self.Duw_T = nn.Parameter(uniform(self.nonlin_size, self.output_size))
+            self.Duw_T = nn.Parameter(torch.zeros(self.nonlin_size, self.output_size))
+            # self.Duw_T = nn.Parameter(uniform(self.nonlin_size, self.output_size))
             self.Duy_T = nn.Parameter(lti_controller.Dkuy.t())
 
             if "P" in info and "P" not in model_config:
@@ -359,9 +359,6 @@ class DissipativeSimplestRINN(RecurrentNetwork, nn.Module):
         self.P = P
         self.Lambda = new_thetahat.Lambda
 
-        # TODO(Neelay) Figure out why this projection sometimes fails.
-        # Most prominent on rigidplus model of flexarm.
-
         try:
             theta.Lambda = self.Lambda
             new_new_theta = self.theta_projector.project(theta.torch_to_np(), to_numpy(self.P))
@@ -370,6 +367,7 @@ class DissipativeSimplestRINN(RecurrentNetwork, nn.Module):
         except Exception as _e:
             print("Using first projection result for thetahat -> theta.")
             new_new_theta = new_theta
+            raise _e # terminating with this failure
 
         new_k = new_new_theta
 

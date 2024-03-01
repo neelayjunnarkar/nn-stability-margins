@@ -87,9 +87,11 @@ env_config = {
     "supply_rate": "l2_gain",
     "disturbance_model": "occasional",
     "disturbance_design_model": "occasional",
-    "design_model": "rigidplus",  # trs in [1, 2] seem kind of the same... Maybe use 1.2.
+    # "design_model": "rigidplus",  # trs in [1, 2] seem kind of the same... Maybe use 1.2.
+    "design_model": "rigidplus_integrator",
     "delta_alpha": 1.0,
-    "supplyrate_scale": 1.6,
+    "supplyrate_scale": 0.5,
+    "lagrange_multiplier": 5,
 }
 
 ## Model Config by Task

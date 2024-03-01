@@ -42,19 +42,30 @@ class FlexibleArmEnv(gym.Env):
         else:
             self.time_max = 1000  # 0.1 seconds with dt = 0.0001
 
-        # Used to scale robustness in rigidplus, with MDeltap = [alpha, 0; 0, -1]
-        # Only used in rigidplus
+        # Used to scale robustness in rigidplus and rigidplus_integrator, with MDeltap = [alpha, 0; 0, -1]
+        # Only used in rigidplus and rigidplus_integrator
         if "delta_alpha" in env_config:
             delta_alpha = env_config["delta_alpha"]
         else:
             delta_alpha = 1.0
 
-        # Used to scale supply rate in rigidplus
-        # Only used in rigidplus
+        # Used to scale supply rate in rigidplus and rigidplus_integrator.
+        # Only used in rigidplus and rigidplus_integrator.
         if "supplyrate_scale" in env_config:
             supplyrate_scale = env_config["supplyrate_scale"]
         else:
             supplyrate_scale = 1.0
+
+        # Lagrange multiplier scales the MDelta.
+        # Only used in rigidplus and rigidplus_integrator.
+        if "lagrange_multiplier" in env_config:
+            lagrange_multiplier = env_config["lagrange_multiplier"]
+        else:
+            lagrange_multiplier = 1.0
+
+        if design_model == "rigidplus_integrator":
+            assert "design_integrator_type" in env_config
+            design_integrator_type = env_config["design_integrator_type"]
 
         self.mb = 1  # Mass of base (Kg)
         self.mt = 0.1  # Mass of tip (Kg)
@@ -92,16 +103,38 @@ class FlexibleArmEnv(gym.Env):
         # States are (x, h, xdot, hdot)
         # x is position of base of rod on cart
         # h is horizontal deviation of tip of rod from the base of the rod
-        # fmt: off
 
-        self.true_model = self._build_true_model(self.observation, design_model, self.disturbance_model, self.supply_rate)
+        self.true_model = self._build_true_model(
+            self.observation, design_model, self.disturbance_model, self.supply_rate
+        )
 
         if design_model == "flexible":
-            self.design_model = self._build_true_model(self.observation, "flexible", self.disturbance_design_model, self.supply_rate)
+            self.design_model = self._build_true_model(
+                self.observation, "flexible", self.disturbance_design_model, self.supply_rate
+            )
         elif design_model == "rigid":
-            self.design_model = self._build_rigid_design_model(self.observation, self.disturbance_design_model, self.supply_rate)
+            self.design_model = self._build_rigid_design_model(
+                self.observation, self.disturbance_design_model, self.supply_rate
+            )
         elif design_model == "rigidplus":
-            self.design_model = self._build_rigidplus_design_model(self.observation, self.disturbance_design_model, self.supply_rate, delta_alpha, supplyrate_scale)
+            self.design_model = self._build_rigidplus_design_model(
+                self.observation,
+                self.disturbance_design_model,
+                self.supply_rate,
+                delta_alpha,
+                supplyrate_scale,
+                lagrange_multiplier,
+            )
+        elif design_model == "rigidplus_integrator":
+            self.design_model = self._build_rigidplus_integrator_design_model(
+                self.observation,
+                self.disturbance_design_model,
+                self.supply_rate,
+                delta_alpha,
+                supplyrate_scale,
+                lagrange_multiplier,
+                design_integrator_type,
+            )
         else:
             raise ValueError(f"Unexpected design model: {design_model}.")
 
@@ -149,7 +182,6 @@ class FlexibleArmEnv(gym.Env):
             self.Cpy = self.Cpy / self.state_space.high
         ob_max = self.Cpy @ x_max
         self.observation_space = spaces.Box(low=-ob_max, high=ob_max, dtype=np.float32)
-
 
         self.state_size = self.nx
         # TODO(Neelay): this nonlin_size parameter likely only works when nv = nw. Fix.
@@ -291,12 +323,20 @@ class FlexibleArmEnv(gym.Env):
         Dpvw = np.zeros((nv, nw), dtype=np.float32)
         Dpvu = np.zeros((nv, nu), dtype=np.float32)
 
-        assert design_model in ["flexible", "rigid", "rigidplus"]
+        assert design_model in ["flexible", "rigid", "rigidplus", "rigidplus_integrator"]
+        if (
+            design_model == "rigid"
+            or design_model == "rigidplus"
+            or design_model == "rigidplus_integrator"
+        ):
+            rigid_type = True
+        else:
+            rigid_type = False
         if observation == "full" and design_model == "flexible":
             # Observe full state
             ny = nx
             Cpy = np.eye(nx, dtype=np.float32)
-        elif observation == "full" and (design_model == "rigid" or design_model == "rigidplus"):
+        elif observation == "full" and rigid_type:
             # Observe "full state" of rigid model, with sensors at top of pendulum (gives x + h, xdot + hdot)
             ny = 2
             Cpy = np.array([[1, 1, 0, 0], [0, 0, 1, 1]], dtype=np.float32)
@@ -304,7 +344,7 @@ class FlexibleArmEnv(gym.Env):
             # Observe x and h
             ny = 2
             Cpy = np.array([[1, 0, 0, 0], [0, 1, 0, 0]], dtype=np.float32)
-        elif observation == "partial" and (design_model == "rigid" or design_model == "rigidplus"):
+        elif observation == "partial" and rigid_type:
             # Observe x + h
             ny = 1
             Cpy = np.array([[1, 1, 0, 0]], dtype=np.float32)
@@ -437,14 +477,22 @@ class FlexibleArmEnv(gym.Env):
         )
         # fmt: on
 
-    def _build_rigidplus_design_model(self, observation, disturbance_model, supply_rate, delta_alpha, supplyrate_scale):
+    def _build_rigidplus_design_model(
+        self,
+        observation,
+        disturbance_model,
+        supply_rate,
+        delta_alpha,
+        supplyrate_scale,
+        lagrange_multiplier,
+    ):
         """
         Build rigid model with additive uncertainty covering the difference between the rigid and flexible models.
 
              d  |-> Delta -> W -|
              |  |               |
              v  |               v
-        u -> + ---------> Gr -> + -> y        
+        u -> + ---------> Gr -> + -> y
         """
 
         assert observation == "partial", "This model only supports partial observation"
@@ -483,67 +531,140 @@ class FlexibleArmEnv(gym.Env):
         #                0.9412
         # W(s) = ------------------------
         #        s^2 + 8.567 s + 5.974e04
-        Ap = np.array(
-            [[0, 0.5, 0, 0], [0, 0, 0, 0], [0, 0, -4.208, 244.4], [0, 0, -244.4, -4.359]],
-            dtype=np.float32,
-        )
-        Bpw = np.array([[0], [0], [-0.04388], [-0.04388]], dtype=np.float32)
-        Bpd = np.array([[0], [1.667], [0], [0]], dtype=np.float32)
-        Bpu = np.array([[0], [1.667], [0], [0]], dtype=np.float32)
-
-        Cpv = np.zeros((1, 4), dtype=np.float32)
-        Dpvw = np.zeros((1, 1), dtype=np.float32)
-        Dpvd = np.ones((1, 1), dtype=np.float32)
-        Dpvu = np.ones((1, 1), dtype=np.float32)
-
-        Cpe = np.array([[1, 0, 0, 0], [0, 0.5, 0, 0]], dtype=np.float32)
-        Dpew = np.zeros((2, 1), dtype=np.float32)
-        Dped = np.zeros((2, 1), dtype=np.float32)
-        Dpeu = np.zeros((2, 1), dtype=np.float32)
-
-        Cpy = np.array([[1, 0, -0.04388, 0.04388]], dtype=np.float32)
-        Dpyw = np.zeros((1, 1), dtype=np.float32)
-        Dpyd = np.zeros((1, 1), dtype=np.float32)
-
-        # # Using unbalanced realization of interconnection with
-        # #                0.9412
-        # # W(s) = ------------------------
-        # #        s^2 + 8.567 s + 5.974e04
         # Ap = np.array(
-        #     [[0, 1, 0, 0], [0, 0, 0, 0], [0, 0, -8.567, -233.4], [0, 0, 256, 0]],
+        #     [[0, 0.5, 0, 0], [0, 0, 0, 0], [0, 0, -4.208, 244.4], [0, 0, -244.4, -4.359]],
         #     dtype=np.float32,
         # )
-        # Bpw = np.array([[0], [0], [0.0625], [0]], dtype=np.float32)
-        # Bpd = np.array([[0], [0.8333], [0], [0]], dtype=np.float32)
-        # Bpu = np.array([[0], [0.8333], [0], [0]], dtype=np.float32)
+        # Bpw = np.array([[0], [0], [-0.04388], [-0.04388]], dtype=np.float32)
+        # Bpd = np.array([[0], [1.667], [0], [0]], dtype=np.float32)
+        # Bpu = np.array([[0], [1.667], [0], [0]], dtype=np.float32)
 
         # Cpv = np.zeros((1, 4), dtype=np.float32)
         # Dpvw = np.zeros((1, 1), dtype=np.float32)
         # Dpvd = np.ones((1, 1), dtype=np.float32)
         # Dpvu = np.ones((1, 1), dtype=np.float32)
 
-        # Cpe = np.array([[1, 0, 0, 0], [0, 1, 0, 0]], dtype=np.float32)
+        # Cpe = np.array([[1, 0, 0, 0], [0, 0.5, 0, 0]], dtype=np.float32)
         # Dpew = np.zeros((2, 1), dtype=np.float32)
         # Dped = np.zeros((2, 1), dtype=np.float32)
         # Dpeu = np.zeros((2, 1), dtype=np.float32)
 
-        # Cpy = np.array([[1, 0, 0, 0.05883]], dtype=np.float32)
+        # Cpy = np.array([[1, 0, -0.04388, 0.04388]], dtype=np.float32)
         # Dpyw = np.zeros((1, 1), dtype=np.float32)
         # Dpyd = np.zeros((1, 1), dtype=np.float32)
 
-        assert delta_alpha >= 0.0 and delta_alpha <= 1.0
-        mdelta_scale = 1
+        # # Using unbalanced realization of interconnection with
+        # #                0.9412
+        # # W(s) = ------------------------
+        # #        s^2 + 8.567 s + 5.974e04
+        Ap = np.array(
+            [[0, 1, 0, 0], [0, 0, 0, 0], [0, 0, -8.567, -233.4], [0, 0, 256, 0]],
+            dtype=np.float32,
+        )
+        Bpw = np.array([[0], [0], [0.0625], [0]], dtype=np.float32)
+        Bpd = np.array([[0], [0.8333], [0], [0]], dtype=np.float32)
+        Bpu = np.array([[0], [0.8333], [0], [0]], dtype=np.float32)
+
+        Cpv = np.zeros((1, 4), dtype=np.float32)
+        Dpvw = np.zeros((1, 1), dtype=np.float32)
+        Dpvd = np.ones((1, 1), dtype=np.float32)
+        Dpvu = np.ones((1, 1), dtype=np.float32)
+
+        Cpe = np.array([[1, 0, 0, 0], [0, 1, 0, 0]], dtype=np.float32)
+        Dpew = np.zeros((2, 1), dtype=np.float32)
+        Dped = np.zeros((2, 1), dtype=np.float32)
+        Dpeu = np.zeros((2, 1), dtype=np.float32)
+
+        Cpy = np.array([[1, 0, 0, 0.05883]], dtype=np.float32)
+        Dpyw = np.zeros((1, 1), dtype=np.float32)
+        Dpyd = np.zeros((1, 1), dtype=np.float32)
+
+        assert delta_alpha >= 0.0
+        mdelta_scale = lagrange_multiplier
         MDeltapvv = mdelta_scale * delta_alpha * np.array([[1]], dtype=np.float32)
         MDeltapvw = np.array([[0]], dtype=np.float32)
         MDeltapww = mdelta_scale * np.array([[-1]], dtype=np.float32)
 
-        gamma = 0.99 # L2 gain
-        alpha = supplyrate_scale # 1.6 # Scale supply rate for better numerical results
-        Xdd = alpha * gamma**2 * np.eye(1, dtype=np.float32)
+        gamma = 0.99  # L2 gain
+        Xdd = supplyrate_scale * gamma**2 * np.eye(1, dtype=np.float32)
         Xde = np.zeros((1, 2), dtype=np.float32)
-        Xee = alpha * -np.eye(2, dtype=np.float32)
+        Xee = supplyrate_scale * -np.eye(2, dtype=np.float32)
 
-    
+        # fmt: off
+        return PlantParameters(
+            Ap, Bpw, Bpd, Bpu, Cpv, Dpvw, Dpvd, Dpvu, Cpe, Dpew, Dped, Dpeu, Cpy, Dpyw, Dpyd,
+            MDeltapvv, MDeltapvw, MDeltapww, Xdd, Xde, Xee
+        )
+        # fmt: on
+
+    def _build_rigidplus_integrator_design_model(
+        self,
+        observation,
+        disturbance_model,
+        supply_rate,
+        delta_alpha,
+        supplyrate_scale,
+        lagrange_multiplier,
+        design_integrator_type,
+    ):
+        assert observation == "partial", "This model only supports partial observation"
+        assert disturbance_model == "occasional", "This model only supports disturbance"
+        assert supply_rate == "l2_gain", "This model only supports a supply rate for L2 gain"
+
+        Ap = np.array([[0, 1], [0, 0]], dtype=np.float32)
+        Bpw = np.array([[0], [0]], dtype=np.float32)
+        Bpu = np.array([[0], [1.0 / self.Mr]], dtype=np.float32)
+        Bpd = np.copy(Bpu)  # Disturbance into control input
+
+        Cpv = np.zeros((1, 2), dtype=np.float32)
+        Dpvw = np.zeros((1, 1), dtype=np.float32)
+        Dpvu = np.zeros((1, 1), dtype=np.float32)
+        Dpvd = np.copy(Dpvu)
+
+        Cpe = np.eye(2, dtype=np.float32)
+        Dpew = np.zeros((2, 1), dtype=np.float32)
+        Dped = np.zeros((2, 1), dtype=np.float32)
+        Dpeu = np.zeros((2, 1), dtype=np.float32)
+
+        Cpy = np.array([[1, 0]], dtype=np.float32)
+        Dpyw = np.zeros((1, 1), dtype=np.float32)
+        Dpyd = np.zeros((1, 1), dtype=np.float32)
+
+        if design_integrator_type == "utoy":
+            ## From u to y
+            ## v = u + d
+            Dpvu = np.eye(1, dtype=np.float32)
+            Dpvd = np.copy(Dpvu)
+            ## w = Delta(v), with ||Delta|| <= b = 0.0005
+            b = 0.0005
+            ## y = x1 + w
+            Dpyw = np.eye(1, dtype=np.float32)
+        elif design_integrator_type == "utox2":
+            ## From u to x2
+            ## v = u + d
+            Dpvu = np.eye(1, dtype=np.float32)
+            Dpvd = np.copy(Dpvu)
+            ## w = Delta(v), with ||Delta|| <= b = 0.1
+            b = 0.1
+            ## x2dot = (u+d)/Mr
+            ## x1dot = x2 + w
+            Bpw = np.array([[1], [0]], dtype=np.float32)
+            ## y = x1
+        else:
+            raise ValueError(
+                f"Unexpected disturbance_integrator_type: {design_integrator_type}."
+            )
+
+        assert delta_alpha >= 0.0
+        MDeltapvv = lagrange_multiplier * b**2 * delta_alpha * np.array([[1]], dtype=np.float32)
+        MDeltapvw = np.array([[0]], dtype=np.float32)
+        MDeltapww = lagrange_multiplier * np.array([[-1]], dtype=np.float32)
+
+        gamma = 0.99  # L2 gain
+        Xdd = supplyrate_scale * gamma**2 * np.eye(1, dtype=np.float32)
+        Xde = np.zeros((1, 2), dtype=np.float32)
+        Xee = supplyrate_scale * -np.eye(2, dtype=np.float32)
+
         # fmt: off
         return PlantParameters(
             Ap, Bpw, Bpd, Bpu, Cpv, Dpvw, Dpvd, Dpvu, Cpe, Dpew, Dped, Dpeu, Cpy, Dpyw, Dpyd,

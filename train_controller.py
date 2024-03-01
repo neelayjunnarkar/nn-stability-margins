@@ -81,9 +81,15 @@ env_config = {
     "supply_rate": "l2_gain",
     "disturbance_model": "occasional",
     "disturbance_design_model": "occasional",
-    "design_model": "rigidplus",  # trs in [1, 2] seem kind of the same... Maybe use 1.2.
+    # "design_model": "rigidplus",  # trs in [1, 2] seem kind of the same... Maybe use 1.2.
+    "design_model": "rigidplus_integrator",
     "delta_alpha": 1.0,
-    "supplyrate_scale": 1.6,
+    # "design_integrator_type": "utox2",
+    # "supplyrate_scale": 0.5,
+    # "lagrange_multiplier": 5,
+    "design_integrator_type": "utoy",
+    "supplyrate_scale": 1,
+    "lagrange_multiplier": 1000,
 }
 
 # Configure the algorithm.
@@ -124,16 +130,16 @@ config = {
         #         "backoff_factor": 1.1,
         #     }
         # }
-        "custom_model": RINN,
-        "custom_model_config": {
-            "state_size": 4,
-            "nonlin_size": 16,
-            "log_std_init": np.log(1.0),
-            "dt": dt,
-            "plant": env,
-            "plant_config": env_config,
-            "eps": 1e-3,
-        },
+        # "custom_model": RINN,
+        # "custom_model_config": {
+        #     "state_size": 2,
+        #     "nonlin_size": 16,
+        #     "log_std_init": np.log(1.0),
+        #     "dt": dt,
+        #     "plant": env,
+        #     "plant_config": env_config,
+        #     "eps": 1e-3,
+        # },
         # "custom_model": DissipativeThetaRINN,
         # "custom_model_config": {
         #     "state_size": 2,
@@ -148,25 +154,27 @@ config = {
         #     "project_delay": 1,
         #     "project_spacing": 1, # 10,
         # }
-        # "custom_model": DissipativeSimplestRINN,
-        # "custom_model_config": {
-        #     "state_size": 4,
-        #     "nonlin_size": 16,
-        #     "log_std_init": np.log(1.0),
-        #     "dt": dt,
-        #     "plant": env,
-        #     "plant_config": env_config,
-        #     "eps": 1e-3,
-        #     # "mode": "simple",
-        #     "mode": "thetahat",
-        #     "trs_mode": "fixed",
-        #     "min_trs": 1.2,  # 1.5, # 1.73,
-        #     "lti_initializer": "dissipative_thetahat",
-        #     "lti_initializer_kwargs": {
-        #         "trs_mode": "fixed",
-        #         "min_trs": 1.2,  # 1.5, # 1.44
-        #     },
-        # },
+        "custom_model": DissipativeSimplestRINN,
+        "custom_model_config": {
+            "state_size": 2,
+            "nonlin_size": 16,
+            "log_std_init": np.log(1.0),
+            "dt": dt,
+            "plant": env,
+            "plant_config": env_config,
+            "eps": 1e-3,
+            # "mode": "simplest",
+            "mode": "thetahat",
+            "trs_mode": "fixed",
+            "min_trs": 1,  # 1.5, # 1.73,
+            "backoff_factor": 1.05,
+            "lti_initializer": "dissipative_thetahat",
+            "lti_initializer_kwargs": {
+                "trs_mode": "fixed",
+                "min_trs": 1,  # 1.5, # 1.44
+                "backoff_factor": 1.05,
+            },
+        },
         # "custom_model": LTIModel,
         # "custom_model_config": {
         #     "dt": dt,
@@ -174,13 +182,13 @@ config = {
         #     "plant_config": env_config,
         #     "learn": True,
         #     "log_std_init": np.log(1.0),
-        #     "state_size": 4,
+        #     "state_size": 2,
         #     "trs_mode": "fixed",
-        #     "min_trs": 1.2,  # 1.5, # 1.44,
+        #     "min_trs": 1.5,  # 1.5, # 1.44,
         #     "lti_controller": "dissipative_thetahat",
         #     "lti_controller_kwargs": {
         #         "trs_mode": "fixed",
-        #         "min_trs": 1.2,  # 1.5 # 1.44
+        #         "min_trs": 1.5,  # 1.5 # 1.44
         #     },
         #     # "lti_controller": "lqr",
         #     # "lti_controller_kwargs": {
@@ -192,7 +200,7 @@ config = {
     ## Testing changes to training parameters
     "sgd_minibatch_size": 2048,
     "train_batch_size": 20480,
-    "lr": 1e-3,
+    "lr": 2e-4,
     "num_envs_per_worker": 10,
     ## End test
     "seed": 0,
@@ -235,7 +243,7 @@ results = tune.run(
     ProjectedPPOTrainer,
     config=config,
     stop={
-        "agent_timesteps_total": 1000e3,
+        "agent_timesteps_total": 6100e3,
     },
     verbose=1,
     trial_name_creator=name_creator,

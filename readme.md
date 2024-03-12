@@ -1,7 +1,41 @@
-Synthesis of Stabilizing Recurrent Equilibrium Network Controllers
-==================================================================
+Neural Network Controller Synthesis
+===================================
 
-This is an implementation of the stabilizing REN controller presented at CDC 2022:
+This repository contains code for the following papers:
+* "Synthesizing Neural Network Controllers with Closed-Loop Dissipativity Guarantees".
+  * Code is the `master` branch.
+  * The `DissipativeSimplestRINN` with mode `thetahat` is the training method and controller model presented in this paper. See `train_controller.py` for example usage.
+* "Synthesis of Stabilizing Recurrent Equilibrium Network Controllers".
+  * Code is at git tag `TODO`.
+
+
+## File Structure
+
+* `envs`: plant models.
+* `models`: controller models.
+* `trainers.py`: trainers modified to include the projection step.
+
+### Runnable files
+* `train_controller.py`: configure and train controllers.
+
+## Package Requirements
+
+This code is tested with Python 3.10.10 and PyTorch 1.11.
+
+## Setup
+
+* `poetry install`
+* Above will install some items then error. Run `poetry run pip install gym==0.21`
+* Now run `poetry install` again 
+
+Then, controller training can be run with `poetry run python train_controller.py`
+
+## Papers in this Repository
+
+```
+TODO
+```
+and
 ```
 @INPROCEEDINGS{9992684,
   author={Junnarkar, Neelay and Yin, He and Gu, Fangda and Arcak, Murat and Seiler, Peter},
@@ -13,31 +47,3 @@ This is an implementation of the stabilizing REN controller presented at CDC 202
   pages={7449-7454},
   doi={10.1109/CDC51059.2022.9992684}}
 ```
-
-## File Structure
-
-* `envs`: models of plants.
-* `models`: controller models and an implicit model for system identification. The controller presented in the paper is in `ProjREN.py`.
-* `learned_models`: parameters trained with an implicit model for system identification.
-* `activations.py`: activation functions with sector-bound information.
-* `trainers.py`: trainers modified to include the projection step.
-
-### Runnable files
-* `train_controller.py`: configure and train controllers.
-* `train_implicit_network.py`: train an implicit model to learn plant dynamics.
-* `plots.py` and `rollout.py`: plotting files.
-
-## Package Requirements
-
-This code is tested with Python 3.9 and PyTorch 1.10.
-
-## Credits
-* The fixed point solvers in the `deq_lib` folder and the basis for the PyTorch implicit model implementation are from the [Deep Equilibrium Models](https://github.com/locuslab/deq) repository.
-
-## Setup
-
-* `poetry install`
-* Above will install some items then error. Run `poetry run pip install gym==0.21`
-* Now run `poetry install` again 
-
-Then, controller training can be run with `poetry run python train_controller.py`

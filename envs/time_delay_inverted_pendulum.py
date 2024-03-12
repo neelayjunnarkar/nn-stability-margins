@@ -116,7 +116,7 @@ class TimeDelayInvertedPendulumEnv(gym.Env):
         self.state = self.next_state(self.state, d, delayed_u)
 
         # Reward for small angle, small angular velocity, and small control
-        reward_state = np.exp(-np.linalg.norm(self.state)**2)
+        reward_state = np.exp(-(np.linalg.norm(self.state) ** 2))
         reward_control = np.exp(-(u[0] ** 2))
         reward = reward_state + reward_control
         # reward = reward_control

@@ -1,13 +1,9 @@
 """
-This folder contains controller models and an implicit model for system identification.
+This folder contains various controller models.
 """
 
-
-# from models.ProjRNNOld import ProjRNNOldModel
-# from models.ProjRNN import ProjRNNModel
 from models.dissipative_RINN import DissipativeRINN
 from models.dissipative_simplest_RINN import DissipativeSimplestRINN
-from models.dissipative_theta_RINN import DissipativeThetaRINN
 from models.fully_connected import FullyConnectedNetwork
 from models.implicit_model import ImplicitModel
 from models.LTI import LTIModel

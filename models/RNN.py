@@ -9,6 +9,21 @@ from utils import build_mlp, uniform
 
 
 class RNN(RecurrentNetwork, nn.Module):
+    """
+    A controller of the form
+
+    xdot(t) = A  x(t) + Bw  w(t) + By  y(t)
+    v(t)    = Cv x(t)            + Dvy y(t)
+    u(t)    = Cu x(t) + Duw w(t) + Duy y(t)
+    w(t)    = phi(v(t))
+
+    where x is the state, v is the input to the nonlinearity phi,
+    w is the output of the nonlinearity phi, y is the input,
+    and u is the output.
+
+    Train with a method that calls project after each gradient step.
+    """
+
     def __init__(
         self,
         obs_space,
@@ -22,14 +37,12 @@ class RNN(RecurrentNetwork, nn.Module):
 
         model_config = model_config["custom_model_config"]
 
-        assert 2*action_space.shape[0] == num_outputs, "Num outputs should be 2 * action dimension"
+        assert (
+            2 * action_space.shape[0] == num_outputs
+        ), "Num outputs should be 2 * action dimension"
 
-        self.state_size = (
-            model_config["state_size"] if "state_size" in model_config else 16
-        )
-        self.nonlin_size = (
-            model_config["nonlin_size"] if "nonlin_size" in model_config else 128
-        )
+        self.state_size = model_config["state_size"] if "state_size" in model_config else 16
+        self.nonlin_size = model_config["nonlin_size"] if "nonlin_size" in model_config else 128
         self.input_size = obs_space.shape[0]
         self.output_size = action_space.shape[0]
 
@@ -59,7 +72,7 @@ class RNN(RecurrentNetwork, nn.Module):
         log_std_init = (
             model_config["log_std_init"]
             if "log_std_init" in model_config
-            else -1.6094379124341003 # log(0.2)
+            else -1.6094379124341003  # log(0.2)
         )
         self.log_stds = nn.Parameter(log_std_init * torch.ones(self.output_size))
 

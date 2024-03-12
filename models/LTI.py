@@ -27,10 +27,14 @@ def print_norms(X, name):
 
 class LTIModel(RecurrentNetwork, nn.Module):
     """
-    An LTI system of the following form:
-
+    An LTI controller of the following form
+    
     xdot(t) = A  x(t) + By  y(t)
     u(t)    = Cu x(t) + Duy y(t)
+
+    where x is the state, y is the input, and u is the output.
+
+    Train with a method that calls project after each gradient step.
     """
 
     # Arguments:

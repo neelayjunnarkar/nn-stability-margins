@@ -21,7 +21,6 @@ from models import (
     RNN,
     DissipativeRINN,
     DissipativeSimplestRINN,
-    DissipativeThetaRINN,
     FullyConnectedNetwork,
     ImplicitModel,
     LTIModel,
@@ -81,7 +80,6 @@ env_config = {
     "supply_rate": "l2_gain",
     "disturbance_model": "occasional",
     "disturbance_design_model": "occasional",
-    # "design_model": "rigidplus",  # trs in [1, 2] seem kind of the same... Maybe use 1.2.
     "design_model": "rigidplus_integrator",
     "delta_alpha": 1.0,
     # "design_integrator_type": "utox2",
@@ -140,20 +138,6 @@ config = {
         #     "plant_config": env_config,
         #     "eps": 1e-3,
         # },
-        # "custom_model": DissipativeThetaRINN,
-        # "custom_model_config": {
-        #     "state_size": 2,
-        #     "nonlin_size": 16,
-        #     "log_std_init": np.log(1.0),
-        #     "dt": dt,
-        #     "plant": env,
-        #     "plant_config": env_config,
-        #     "eps": 1e-3,
-        #     "trs_mode": "fixed",
-        #     "min_trs": 1.44,
-        #     "project_delay": 1,
-        #     "project_spacing": 1, # 10,
-        # }
         "custom_model": DissipativeSimplestRINN,
         "custom_model_config": {
             "state_size": 2,
@@ -163,15 +147,14 @@ config = {
             "plant": env,
             "plant_config": env_config,
             "eps": 1e-3,
-            # "mode": "simplest",
             "mode": "thetahat",
             "trs_mode": "fixed",
-            "min_trs": 1,  # 1.5, # 1.73,
+            "min_trs": 1,
             "backoff_factor": 1.05,
             "lti_initializer": "dissipative_thetahat",
             "lti_initializer_kwargs": {
                 "trs_mode": "fixed",
-                "min_trs": 1,  # 1.5, # 1.44
+                "min_trs": 1,
                 "backoff_factor": 1.05,
             },
         },
@@ -190,11 +173,6 @@ config = {
         #         "trs_mode": "fixed",
         #         "min_trs": 1.5,  # 1.5 # 1.44
         #     },
-        #     # "lti_controller": "lqr",
-        #     # "lti_controller_kwargs": {
-        #     #     "Q": np.eye(2, dtype=np.float32),
-        #     #     "R": np.array([[0.01]], dtype=np.float32)
-        #     # },
         # },
     },
     ## Testing changes to training parameters

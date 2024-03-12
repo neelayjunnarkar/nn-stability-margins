@@ -12,9 +12,19 @@ from utils import build_mlp, uniform
 
 class RINN(RecurrentNetwork, nn.Module):
     """
-    A recurrent implicit neural network of the following form: TODO(Neelay)
+    A recurrent implicit neural network controller of the form
+
+    xdot(t) = A  x(t) + Bw  w(t) + By  y(t)
+    v(t)    = Cv x(t) + Dvw w(t) + Dvy y(t)
+    u(t)    = Cu x(t) + Duw w(t) + Duy y(t)
+    w(t)    = phi(v(t))
+
+    where x is the state, v is the input to the nonlinearity phi,
+    w is the output of the nonlinearity phi, y is the input,
+    and u is the output.
 
     Train with a method that calls project after each gradient step.
+    This projection only ensures well-posedness of the implicit equation.
     """
 
     def __init__(

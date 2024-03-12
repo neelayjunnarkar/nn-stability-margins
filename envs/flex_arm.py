@@ -285,7 +285,7 @@ class FlexibleArmEnv(gym.Env):
         return self.get_obs()
 
     def get_obs(self):
-        return self.Cpy @ self.state  # TODO(Neelay): generalize
+        return self.Cpy @ self.state
 
     def get_params(self):
         return self.design_model
@@ -651,9 +651,7 @@ class FlexibleArmEnv(gym.Env):
             Bpw = np.array([[1], [0]], dtype=np.float32)
             ## y = x1
         else:
-            raise ValueError(
-                f"Unexpected disturbance_integrator_type: {design_integrator_type}."
-            )
+            raise ValueError(f"Unexpected disturbance_integrator_type: {design_integrator_type}.")
 
         assert delta_alpha >= 0.0
         MDeltapvv = lagrange_multiplier * b**2 * delta_alpha * np.array([[1]], dtype=np.float32)

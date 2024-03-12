@@ -29,9 +29,22 @@ def print_norms(X, name):
 
 class DissipativeRINN(RecurrentNetwork, nn.Module):
     """
-    A recurrent implicit neural network of the following form: TODO(Neelay)
+    A recurrent implicit neural network controller of the form
+
+    xdot(t) = A  x(t) + Bw  w(t) + By  y(t)
+    v(t)    = Cv x(t) + Dvw w(t) + Dvy y(t)
+    u(t)    = Cu x(t) + Duw w(t) + Duy y(t)
+    w(t)    = phi(v(t))
+
+    where x is the state, v is the input to the nonlinearity phi,
+    w is the output of the nonlinearity phi, y is the input,
+    and u is the output.
 
     Train with a method that calls project after each gradient step.
+
+    This controller is parameterized in thetahat parameters and applies
+    a projection as necessary to ensure closed-loop dissipativity.
+    See "Synthesizing Neural Network Controllers with Closed-Loop Dissipativity Guarantees".
     """
 
     # Custom config parameters:
@@ -241,9 +254,8 @@ class DissipativeRINN(RecurrentNetwork, nn.Module):
         self.Dvw_T = theta.Dkvw.t()
         self.Dvy_T = theta.Dkvy.t()
         self.Cu_T = theta.Cku.t()
-        # self.Duw_T is already a parameter = theta.Dkuw.t()
+        # self.Duw_T is already a parameter
         self.Duy_T = theta.Dkuy.t()
-        # self.construct_theta()
 
         print_norms(self.A_T.t(), "Ak   ")
         print_norms(self.Bw_T.t(), "Bkw  ")
@@ -353,120 +365,6 @@ class DissipativeRINN(RecurrentNetwork, nn.Module):
             "value.4.weight_g",
             "value.4.weight_v",
         ], missing
-
-    # def construct_theta(self):
-    #     """Construct theta, the parameters of the controller, from thetahat,
-    #     the decision variables for the dissipativity condition."""
-
-    #     # torch.linalg.solve(A, B) solves for X in AX = B, and assumes A is invertible
-
-    #     # Construct V and U by solving VU^T = I - RS
-    #     # V = self.R
-    #     # U = torch.linalg.solve(
-    #     #     V, torch.eye(self.state_size, device=V.device) - torch.mm(self.R, self.S)
-    #     # ).t()
-
-    #     svdU, svdSigma, svdV_T = torch.linalg.svd(torch.eye(self.state_size) - self.R @ self.S)
-    #     sqrt_svdSigma = torch.diag(torch.sqrt(svdSigma))
-    #     V = svdU @ sqrt_svdSigma
-    #     U = svdV_T.t() @ sqrt_svdSigma
-
-    #     print_norms(U, "U")
-    #     print_norms(torch.linalg.inv(U), "Uinv")
-    #     print_norms(V, "V")
-    #     print_norms(torch.linalg.inv(V), "Vinv")
-
-    #     # Construct P via P = [I, S; 0, U^T] Y^-1
-    #     # Actually no need to do this
-
-    #     # Reconstruct Dvy and Dvw from Dvyhat and Dvwhat
-    #     Dvy = torch.linalg.solve(self.Lambda, self.Dvyhat)
-    #     Dvw = torch.linalg.solve(self.Lambda, self.Dvwhat)
-
-    #     # # Solve for A, By, Cu, and Duy from NA
-    #     # # NA = NA1 + NA2 NA3 NA4
-    #     # NA = torch.vstack(
-    #     #     (torch.hstack((self.NA11, self.NA12)), torch.hstack((self.NA21, self.NA22)))
-    #     # )
-
-    #     # NA111 = torch.mm(self.S, torch.mm(self.Ap, self.R))
-    #     # NA112 = V.new_zeros((self.state_size, self.Cpy.shape[0]))
-    #     # NA121 = V.new_zeros((self.Bpu.shape[1], self.state_size))
-    #     # NA122 = V.new_zeros((self.Bpu.shape[1], self.Cpy.shape[0]))
-    #     # NA1 = torch.vstack((torch.hstack((NA111, NA112)), torch.hstack((NA121, NA122))))
-
-    #     # NA211 = U
-    #     # NA212 = torch.mm(self.S, self.Bpu)
-    #     # NA221 = V.new_zeros((self.Bpu.shape[1], U.shape[1]))
-    #     # NA222 = torch.eye(self.Bpu.shape[1], device=V.device)
-    #     # NA2 = torch.vstack((torch.hstack((NA211, NA212)), torch.hstack((NA221, NA222))))
-
-    #     # NA411 = V.t()
-    #     # NA412 = V.new_zeros(V.shape[1], self.Cpy.shape[0])
-    #     # NA421 = torch.mm(self.Cpy, self.R)
-    #     # NA422 = torch.eye(self.Cpy.shape[0], device=V.device)
-    #     # NA4 = torch.vstack((torch.hstack((NA411, NA412)), torch.hstack((NA421, NA422))))
-
-    #     # NA3NA4 = torch.linalg.solve(NA2, NA - NA1)
-    #     # NA3 = torch.linalg.solve(NA4.t(), NA3NA4.t()).t()
-
-    #     # A = NA3[: self.state_size, : self.state_size]
-    #     # By = NA3[: self.state_size, self.state_size :]
-    #     # Cu = NA3[self.state_size :, : self.state_size]
-    #     # Duy = NA3[self.state_size :, self.state_size :]
-
-    #     Ap = self.plant_params.Ap
-    #     Bpu = self.plant_params.Bpu
-    #     Cpy = self.plant_params.Cpy
-
-    #     Duy = self.NA22
-    #     By = torch.linalg.solve(U, self.NA12 - self.S @ Bpu @ Duy)
-    #     Cu = torch.linalg.solve(V, self.NA21.t() - self.R @ Cpy.t() @ Duy.t()).t()
-    #     AVT = torch.linalg.solve(
-    #         U,
-    #         self.NA11
-    #         - U @ By @ Cpy @ self.R
-    #         - self.S @ Bpu @ (Cu @ V.t() + Duy @ Cpy @ self.R)
-    #         - self.S @ Ap @ self.R,
-    #     )
-    #     A = torch.linalg.solve(V, AVT.t()).t()
-
-    #     # Solve for Bw from NB
-    #     # NB = NB1 + U Bw
-    #     NB1 = torch.mm(self.S, torch.mm(Bpu, self.Duw_T.t()))
-    #     Bw = torch.linalg.solve(U, self.NB - NB1)
-
-    #     # Solve for Cv from NC
-    #     # NC = NC1 + Lambda Cv V^T
-    #     NC1 = torch.mm(self.Dvyhat, torch.mm(Cpy, self.R))
-    #     CvVT = torch.linalg.solve(self.Lambda, self.NC - NC1)
-    #     Cv = torch.linalg.solve(V, CvVT.t()).t()
-    #     # Bring together the theta parameters here
-    #     self.A_T = A.t()
-    #     self.Bw_T = Bw.t()
-    #     self.By_T = By.t()
-
-    #     self.Cv_T = Cv.t()
-    #     self.Dvw_T = Dvw.t()
-    #     self.Dvy_T = Dvy.t()
-
-    #     self.Cu_T = Cu.t()
-    #     # self.Duw_T is already a parameter
-    #     self.Duy_T = Duy.t()
-
-    #     # print(A, self.A_T)
-
-    #     assert self.A_T.shape == (self.state_size, self.state_size)
-    #     assert self.Bw_T.shape == (self.nonlin_size, self.state_size)
-    #     assert self.By_T.shape == (self.input_size, self.state_size)
-
-    #     assert self.Cv_T.shape == (self.state_size, self.nonlin_size)
-    #     assert self.Dvw_T.shape == (self.nonlin_size, self.nonlin_size)
-    #     assert self.Dvy_T.shape == (self.input_size, self.nonlin_size)
-
-    #     assert self.Cu_T.shape == (self.state_size, self.output_size)
-    #     assert self.Duw_T.shape == (self.nonlin_size, self.output_size)
-    #     assert self.Duy_T.shape == (self.input_size, self.output_size)
 
     @override(ModelV2)
     def get_initial_state(self):

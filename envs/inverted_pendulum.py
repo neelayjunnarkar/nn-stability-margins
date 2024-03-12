@@ -50,15 +50,13 @@ class InvertedPendulumEnv(gym.Env):
 
         self.nx = 2  # Plant state size
         self.nw = 1  # Output size of uncertainty Deltap
-        self.nd = None # Disturbance size. Defined based on supply_rate.
+        self.nd = None  # Disturbance size. Defined based on supply_rate.
         self.nu = 1  # Control input size
         self.nv = 1  # Input size to uncertainty Deltap
-        self.ne = None # Performance output size. Defined based on supply_rate.
+        self.ne = None  # Performance output size. Defined based on supply_rate.
         self.ny = None  # Measurement output size. Defined later.
 
-        self.Ap = np.array(
-            [[0, 1], [0, -self.mu / (self.m * self.l**2)]], dtype=np.float32
-        )
+        self.Ap = np.array([[0, 1], [0, -self.mu / (self.m * self.l**2)]], dtype=np.float32)
         self.Bpw = np.array([[0], [self.g / self.l]], dtype=np.float32)
         self.Bpu = np.array([[0], [1 / (self.m * self.l**2)]], dtype=np.float32)
 
@@ -73,15 +71,15 @@ class InvertedPendulumEnv(gym.Env):
             self.ny = 1
             self.Cpy = np.array([[1, 0]], dtype=np.float32)
         else:
-            raise ValueError(
-                f"observation {observation} must be one of 'partial', 'full'"
-            )
+            raise ValueError(f"observation {observation} must be one of 'partial', 'full'")
         self.Dpyw = np.zeros((self.ny, self.nw), dtype=np.float32)
         # Dpyu is always 0
 
         assert "supply_rate" in env_config
         if env_config["supply_rate"] == "stability":
-            print("Plant using stability construction for disturbance, performance output, and supply rate.")
+            print(
+                "Plant using stability construction for disturbance, performance output, and supply rate."
+            )
             # This has issues because of the -Xde Ded - Ded^T Xde^T - Xde < 0 condition.
             self.nd = 1
             self.ne = self.nx
@@ -101,7 +99,9 @@ class InvertedPendulumEnv(gym.Env):
             self.Xde = np.zeros((self.nd, self.ne), dtype=np.float32)
             self.Xee = -alpha * np.eye(self.ne, dtype=np.float32)
         elif env_config["supply_rate"] == "l2_gain":
-            print("Plant using L2 gain construction for disturbance, performance output, and supply rate.")
+            print(
+                "Plant using L2 gain construction for disturbance, performance output, and supply rate."
+            )
             # Supply rate for L2 gain of 0.99 from disturbance to output being the state
             self.nd = self.nu
             self.ne = self.nx
@@ -121,7 +121,9 @@ class InvertedPendulumEnv(gym.Env):
             self.Xde = np.zeros((self.nd, self.ne), dtype=np.float32)
             self.Xee = -alpha * np.eye(self.ne, dtype=np.float32)
         else:
-            raise ValueError(f"Supply rate {env_config['supply_rate']} must be one of: 'stability'.")
+            raise ValueError(
+                f"Supply rate {env_config['supply_rate']} must be one of: 'stability'."
+            )
 
         # Make sure dimensions of parameters match up.
         self.check_parameter_sizes()
@@ -144,18 +146,20 @@ class InvertedPendulumEnv(gym.Env):
             self.Cpy = self.Cpy / self.observation_space.high
 
         self.state_size = self.nx
-        self.nonlin_size = self.nv  # TODO(Neelay): this nonlin_size parameter likely only works when nv = nw. Fix.
+        self.nonlin_size = (
+            self.nv
+        )  # TODO(Neelay): this nonlin_size parameter likely only works when nv = nw. Fix.
 
         # Sector bounds on Delta (in this case Delta = sin)
         # Sin is sector-bounded [0, 1] from [-pi, pi], [2/pi, 1] from [-pi/2, pi/2], and sector-bounded about [-0.2173, 1] in general.
         self.C_Delta = 0
         self.D_Delta = 1
 
-        self.MDeltapvv = np.array([[-2*self.C_Delta*self.D_Delta]], dtype=np.float32)
-        self.MDeltapvw = np.array([[self.C_Delta+self.D_Delta]], dtype=np.float32)
+        self.MDeltapvv = np.array([[-2 * self.C_Delta * self.D_Delta]], dtype=np.float32)
+        self.MDeltapvw = np.array([[self.C_Delta + self.D_Delta]], dtype=np.float32)
         self.MDeltapww = np.array([[-2]], dtype=np.float32)
 
-        self.max_reward = 1 # 2.1
+        self.max_reward = 1  # 2.1
 
         self.seed(env_config["seed"] if "seed" in env_config else None)
 
@@ -197,12 +201,12 @@ class InvertedPendulumEnv(gym.Env):
             d = np.zeros((self.nd,), dtype=np.float32)
         elif self.disturbance_model == "occasional":
             # Have disturbance ocurr (in expectation) thrice a second.
-            p = 3*self.dt
+            p = 3 * self.dt
             rand = self.np_random.uniform()
-            if rand < p/2:
-                d = 3*self.action_space.low.astype(np.float32)
+            if rand < p / 2:
+                d = 3 * self.action_space.low.astype(np.float32)
             elif rand < p:
-                d = 3*self.action_space.high.astype(np.float32)
+                d = 3 * self.action_space.high.astype(np.float32)
             else:
                 d = np.zeros((self.nd,), dtype=np.float32)
         else:
@@ -249,35 +253,41 @@ class InvertedPendulumEnv(gym.Env):
 
     def get_params(self):
         return PlantParameters(
-            self.Ap, self.Bpw, self.Bpd, self.Bpu, 
-            self.Cpv, self.Dpvw, self.Dpvd, self.Dpvu,
-            self.Cpe, self.Dpew, self.Dped, self.Dpeu,
-            self.Cpy, self.Dpyw, self.Dpyd,
-            self.MDeltapvv, self.MDeltapvw, self.MDeltapww,
-            self.Xdd, self.Xde, self.Xee
+            self.Ap,
+            self.Bpw,
+            self.Bpd,
+            self.Bpu,
+            self.Cpv,
+            self.Dpvw,
+            self.Dpvd,
+            self.Dpvu,
+            self.Cpe,
+            self.Dpew,
+            self.Dped,
+            self.Dpeu,
+            self.Cpy,
+            self.Dpyw,
+            self.Dpyd,
+            self.MDeltapvv,
+            self.MDeltapvw,
+            self.MDeltapww,
+            self.Xdd,
+            self.Xde,
+            self.Xee,
         )
 
     def check_parameter_sizes(self):
         assert (
             self.Ap.shape[0] == self.nx
-            and self.Ap.shape[0]
-            == self.Bpw.shape[0]
-            == self.Bpd.shape[0]
-            == self.Bpu.shape[0]
+            and self.Ap.shape[0] == self.Bpw.shape[0] == self.Bpd.shape[0] == self.Bpu.shape[0]
         ), f"{self.Ap.shape}, {self.Bpw.shape}, {self.Bpd.shape}, {self.Bpu.shape}"
         assert (
             self.Cpv.shape[0] == self.nv
-            and self.Cpv.shape[0]
-            == self.Dpvw.shape[0]
-            == self.Dpvd.shape[0]
-            == self.Dpvu.shape[0]
+            and self.Cpv.shape[0] == self.Dpvw.shape[0] == self.Dpvd.shape[0] == self.Dpvu.shape[0]
         ), f"{self.Cpv.shape}, {self.Dpvw.shape}, {self.Dpvd.shape}, {self.Dpvu.shape}"
         assert (
             self.Cpe.shape[0] == self.ne
-            and self.Cpe.shape[0]
-            == self.Dpew.shape[0]
-            == self.Dped.shape[0]
-            == self.Dpeu.shape[0]
+            and self.Cpe.shape[0] == self.Dpew.shape[0] == self.Dped.shape[0] == self.Dpeu.shape[0]
         ), f"{self.Cpe.shape}, {self.Dpew.shape}, {self.Dped.shape}, {self.Dpeu.shape}"
         assert (
             self.Cpy.shape[0] == self.ny
@@ -285,24 +295,15 @@ class InvertedPendulumEnv(gym.Env):
         ), f"{self.Cpy.shape}, {self.Dpyw.shape}, {self.Dpyd.shape}"
         assert (
             self.Ap.shape[1] == self.nx
-            and self.Ap.shape[1]
-            == self.Cpv.shape[1]
-            == self.Cpe.shape[1]
-            == self.Cpy.shape[1]
+            and self.Ap.shape[1] == self.Cpv.shape[1] == self.Cpe.shape[1] == self.Cpy.shape[1]
         ), f"{self.Ap.shape}, {self.Cpv.shape}, {self.Cpe.shape}, {self.Cpy.shape}"
         assert (
             self.Bpw.shape[1] == self.nw
-            and self.Bpw.shape[1]
-            == self.Dpvw.shape[1]
-            == self.Dpew.shape[1]
-            == self.Dpyw.shape[1]
+            and self.Bpw.shape[1] == self.Dpvw.shape[1] == self.Dpew.shape[1] == self.Dpyw.shape[1]
         ), f"{self.Bpw.shape}, {self.Dpvw.shape}, {self.Dpew.shape}, {self.Dpyw.shape}"
         assert (
             self.Bpd.shape[1] == self.nd
-            and self.Bpd.shape[1]
-            == self.Dpvd.shape[1]
-            == self.Dped.shape[1]
-            == self.Dpyd.shape[1]
+            and self.Bpd.shape[1] == self.Dpvd.shape[1] == self.Dped.shape[1] == self.Dpyd.shape[1]
         ), f"{self.Bpd.shape}, {self.Dvpd.shape}, {self.Dped.shape}, {self.Dpyd.shape}"
         assert (
             self.Bpu.shape[1] == self.nu

@@ -13,11 +13,13 @@ from utils import build_mlp, uniform
 
 class ImplicitModel(TorchModelV2, nn.Module):
     """
-    A model of the form
-    y = Cx + Du
-    x = Delta(Ax + Bu)
-    where u is the input, x is the state, y is the output, and
-    Delta is a nonlinearity.
+    A controller of the form
+
+    u = Cx + Dy
+    x = Delta(Ax + By)
+
+    where x is the state, y is the input, u is the output,
+    and Delta is a nonlinearity.
 
     Train with a method that calls project after each gradient step.
 
@@ -31,9 +33,7 @@ class ImplicitModel(TorchModelV2, nn.Module):
         model_config = model_config["custom_model_config"]
 
         self.input_size = obs_space.shape[0]
-        self.state_size = (
-            model_config["state_size"] if "state_size" in model_config else 128
-        )
+        self.state_size = model_config["state_size"] if "state_size" in model_config else 128
         self.output_size = num_outputs
 
         # _T for transpose
@@ -52,9 +52,7 @@ class ImplicitModel(TorchModelV2, nn.Module):
         self.delta = activations_map[model_config["delta"]]()
 
         # self.deq = torchdeq.get_deq(f_solver="broyden", f_max_iter=30, b_max_iter=30)
-        self.deq = torchdeq.get_deq(
-            f_solver="fixed_point_iter", f_max_iter=30, b_max_iter=30
-        )
+        self.deq = torchdeq.get_deq(f_solver="fixed_point_iter", f_max_iter=30, b_max_iter=30)
 
         self.value = build_mlp(
             input_size=obs_space.shape[0],
@@ -62,9 +60,7 @@ class ImplicitModel(TorchModelV2, nn.Module):
             n_layers=model_config["baseline_n_layers"]
             if "baseline_n_layers" in model_config
             else 2,
-            size=model_config["baseline_size"]
-            if "baseline_size" in model_config
-            else 64,
+            size=model_config["baseline_size"] if "baseline_size" in model_config else 64,
         )
 
         apply_norm(self, filter_out=["C_T", "D_T"])
@@ -82,9 +78,7 @@ class ImplicitModel(TorchModelV2, nn.Module):
         def delta_tilde(x):
             return self.delta(x @ self.A_T + self._last_obs @ self.B_T)
 
-        x0 = torch.zeros(
-            (self._last_obs.shape[0], self.state_size), device=self._last_obs.device
-        )
+        x0 = torch.zeros((self._last_obs.shape[0], self.state_size), device=self._last_obs.device)
         x, info = self.deq(delta_tilde, x0)
         x = x[-1]
 
@@ -106,13 +100,4 @@ class ImplicitModel(TorchModelV2, nn.Module):
             if max_abs_row_sum > 0.999:
                 self.A_T *= 0.99 / max_abs_row_sum
                 new_max_abs_row_sum = torch.linalg.matrix_norm(self.A_T, ord=1)
-                print(
-                    f"Reducing max abs row sum: {max_abs_row_sum} -> {new_max_abs_row_sum}"
-                )
-        print(
-            torch.max(
-                torch.tensor(
-                    [x.abs().max() for x in [self.A_T, self.B_T, self.C_T, self.D_T]]
-                )
-            )
-        )
+                print(f"Reducing max abs row sum: {max_abs_row_sum} -> {new_max_abs_row_sum}")

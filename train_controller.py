@@ -12,7 +12,7 @@ import torch
 from ray import tune
 from ray.rllib.agents.ppo import PPOTrainer
 
-from envs import FlexibleArmEnv, InvertedPendulumEnv, TimeDelayInvertedPendulumEnv
+from envs import FlexibleArmEnv, InvertedPendulumEnv, TimeDelayInvertedPendulumEnv, DiskMarginExampleEnv
 
 import lti_controllers
 
@@ -34,10 +34,14 @@ if use_savio:
     N_CPUS = int(os.getenv("SLURM_CPUS_ON_NODE"))
     JOB_ID = os.getenv("SLURM_JOB_ID")
 else:
-    # N_CPUS = 1  # test
-    N_CPUS = multiprocessing.cpu_count()
+    # N_CPUS = 1 # test
+    # N_CPUS = 2 # test
+    N_CPUS = multiprocessing.cpu_count() / 2
 n_tasks = 1
 n_workers_per_task = int(math.floor(N_CPUS / n_tasks)) - 1 - 1
+
+seed = 0
+
 
 # Same dt must be used in controller models
 # dt = 0.01
@@ -70,25 +74,32 @@ n_workers_per_task = int(math.floor(N_CPUS / n_tasks)) - 1 - 1
 #     "disturbance_design_model": "occasional",
 #     "design_model": "rigid",
 # }
+# dt = 0.001
+# env = FlexibleArmEnv
+# env_config = {
+#     "observation": "partial",
+#     "normed": True,
+#     "dt": dt,
+#     "rollout_length": int(2 / dt) - 1,
+#     "supply_rate": "l2_gain",
+#     "disturbance_model": "occasional",
+#     "disturbance_design_model": "occasional",
+#     "design_model": "rigidplus_integrator",
+#     "delta_alpha": 1.0,
+#     # "design_integrator_type": "utox2",
+#     # "supplyrate_scale": 0.5,
+#     # "lagrange_multiplier": 5,
+#     "design_integrator_type": "utoy",
+#     "supplyrate_scale": 1,
+#     "lagrange_multiplier": 1000,
+# }
 dt = 0.001
-env = FlexibleArmEnv
+env = DiskMarginExampleEnv
 env_config = {
-    "observation": "partial",
-    "normed": True,
     "dt": dt,
-    "rollout_length": int(2 / dt) - 1,
-    "supply_rate": "l2_gain",
-    "disturbance_model": "occasional",
-    "disturbance_design_model": "occasional",
-    "design_model": "rigidplus_integrator",
-    "delta_alpha": 1.0,
-    # "design_integrator_type": "utox2",
-    # "supplyrate_scale": 0.5,
-    # "lagrange_multiplier": 5,
-    "design_integrator_type": "utoy",
-    "supplyrate_scale": 1,
-    "lagrange_multiplier": 1000,
+    "seed": seed,
 }
+
 
 # Configure the algorithm.
 config = {
@@ -140,7 +151,7 @@ config = {
         # },
         "custom_model": DissipativeSimplestRINN,
         "custom_model_config": {
-            "state_size": 2,
+            "state_size": 3,
             "nonlin_size": 16,
             "log_std_init": np.log(1.0),
             "dt": dt,
@@ -150,13 +161,14 @@ config = {
             "mode": "thetahat",
             "trs_mode": "fixed",
             "min_trs": 1,
-            "backoff_factor": 1.05,
+            "backoff_factor": 1.1,
             "lti_initializer": "dissipative_thetahat",
             "lti_initializer_kwargs": {
                 "trs_mode": "fixed",
                 "min_trs": 1,
-                "backoff_factor": 1.05,
+                "backoff_factor": 1.1,
             },
+            "fix_mdeltap": False
         },
         # "custom_model": LTIModel,
         # "custom_model_config": {
@@ -181,7 +193,7 @@ config = {
     "lr": 2e-4,
     "num_envs_per_worker": 10,
     ## End test
-    "seed": 0,
+    "seed": seed,
     "num_workers": n_workers_per_task,
     "framework": "torch",
     "num_gpus": 0,  # 1,
@@ -221,7 +233,7 @@ results = tune.run(
     ProjectedPPOTrainer,
     config=config,
     stop={
-        "agent_timesteps_total": 6100e3,
+        "agent_timesteps_total": 1e6,
     },
     verbose=1,
     trial_name_creator=name_creator,

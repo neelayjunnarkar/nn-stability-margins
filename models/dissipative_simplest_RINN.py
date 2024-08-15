@@ -28,6 +28,12 @@ def print_norms(X, name):
     )
 
 
+def MDeltapvvToLDeltap(MDeltapvv):
+    Dm, Vm = np.linalg.eigh(MDeltapvv)
+    LDeltap = np.diag(np.sqrt(Dm)) @ Vm.T
+    return LDeltap
+
+
 class DissipativeSimplestRINN(RecurrentNetwork, nn.Module):
     """
     A recurrent implicit neural network controller of the form
@@ -69,6 +75,7 @@ class DissipativeSimplestRINN(RecurrentNetwork, nn.Module):
     #   min_trs:  1.0
     #   backoff_factor: 1.1
     #   mode: simplest
+    #   fix_mdeltap: true
     def __init__(
         self,
         obs_space,
@@ -88,8 +95,12 @@ class DissipativeSimplestRINN(RecurrentNetwork, nn.Module):
             2 * action_space.shape[0] == num_outputs
         ), "Num outputs should be 2 * action dimension"
 
-        self.state_size = model_config["state_size"] if "state_size" in model_config else 16
-        self.nonlin_size = model_config["nonlin_size"] if "nonlin_size" in model_config else 128
+        self.state_size = (
+            model_config["state_size"] if "state_size" in model_config else 16
+        )
+        self.nonlin_size = (
+            model_config["nonlin_size"] if "nonlin_size" in model_config else 128
+        )
         self.input_size = obs_space.shape[0]
         self.output_size = action_space.shape[0]
 
@@ -105,7 +116,9 @@ class DissipativeSimplestRINN(RecurrentNetwork, nn.Module):
         # nonlineary Delta input v, output u,
         # and nonlinearity Delta.
 
-        self.deq = torchdeq.get_deq(f_solver="fixed_point_iter", f_max_iter=30, b_max_iter=30)
+        self.deq = torchdeq.get_deq(
+            f_solver="fixed_point_iter", f_max_iter=30, b_max_iter=30
+        )
 
         log_std_init = (
             model_config["log_std_init"]
@@ -135,6 +148,7 @@ class DissipativeSimplestRINN(RecurrentNetwork, nn.Module):
         assert "plant_config" in model_config
         plant = model_config["plant"](model_config["plant_config"])
         np_plant_params = plant.get_params()
+        self.plant_params = np_plant_params.np_to_torch(device=self.log_stds.device)
 
         # Define parameters
 
@@ -143,18 +157,30 @@ class DissipativeSimplestRINN(RecurrentNetwork, nn.Module):
         # nonlineary Delta input v, output u,
         # and nonlinearity Delta.
 
+        # Initial values for P
         if "P" in model_config:
             self.P = from_numpy(model_config["P"])
 
+        # Initial values for Lambda
         if "Lambda" in model_config:
-            self.Lambda = from_numpy(model_config["Lambda"], device=self.log_stds.device)
+            self.Lambda = from_numpy(
+                model_config["Lambda"], device=self.log_stds.device
+            )
         else:
             self.Lambda = torch.eye(self.nonlin_size, device=self.log_stds.device)
 
-        self.plant_params = np_plant_params.np_to_torch(device=self.Lambda.device)
+        # Initialize values for MDeltap
+        self.LDeltap = MDeltapvvToLDeltap(np_plant_params.MDeltapvv)
+        self.MDeltapvv = np_plant_params.MDeltapvv
+        self.MDeltapvw = np_plant_params.MDeltapvw
+        self.MDeltapww = np_plant_params.MDeltapww
+        self.fix_mdeltap = model_config["fix_mdeltap"] if "fix_mdeltap" in model_config else True
+        print(f"MDeltaP fixed: {self.fix_mdeltap}")
 
         lti_initializer = (
-            model_config["lti_initializer"] if "lti_initializer" in model_config else None
+            model_config["lti_initializer"]
+            if "lti_initializer" in model_config
+            else None
         )
         if lti_initializer is not None:
             print(f"Initializing using {lti_initializer} LTI controller.")
@@ -192,7 +218,9 @@ class DissipativeSimplestRINN(RecurrentNetwork, nn.Module):
                 print("Using P from LTI initialization.")
                 self.P = from_numpy(info["P"], device=self.A_T.device)
             # Might not want the following
-            self.Lambda = torch.zeros((self.nonlin_size, self.nonlin_size), device=self.A_T.device)
+            self.Lambda = torch.zeros(
+                (self.nonlin_size, self.nonlin_size), device=self.A_T.device
+            )
         else:
             self.A_T = nn.Parameter(uniform(self.state_size, self.state_size))
             self.Bw_T = nn.Parameter(uniform(self.nonlin_size, self.state_size))
@@ -218,11 +246,14 @@ class DissipativeSimplestRINN(RecurrentNetwork, nn.Module):
             output_size=self.output_size,
             state_size=self.state_size,
             input_size=self.input_size,
+            plant_uncertainty_constraints=plant.plant_uncertainty_constraints,
         )
 
         trs_mode = model_config["trs_mode"] if "trs_mode" in model_config else "fixed"
         min_trs = model_config["min_trs"] if "min_trs" in model_config else 1.0
-        backoff_factor = model_config["backoff_factor"] if "backoff_factor" in model_config else 1.1
+        backoff_factor = (
+            model_config["backoff_factor"] if "backoff_factor" in model_config else 1.1
+        )
 
         self.thetahat_projector = ThetahatProjector(
             np_plant_params,
@@ -236,7 +267,7 @@ class DissipativeSimplestRINN(RecurrentNetwork, nn.Module):
             backoff_factor=backoff_factor,
         )
 
-        self.mode = model_config["mode"] if "mode" in model_config else "simplest"
+        self.mode = model_config["mode"] if "mode" in model_config else "thetahat"
 
         self.oldtheta = None
 
@@ -279,13 +310,39 @@ class DissipativeSimplestRINN(RecurrentNetwork, nn.Module):
                     self.Lambda
                 )
                 # fmt: on
-                is_dissipative, newP, newLambda = self.theta_projector.is_dissipative(
-                    controller_params.torch_to_np(), to_numpy(self.P)
-                )
+                # is_dissipative, newP, newLambda = self.theta_projector.is_dissipative2(
+                #     controller_params.torch_to_np(), to_numpy(self.P)
+                # )
+                if self.fix_mdeltap:
+                    is_dissipative, newP, newLambda = self.theta_projector.is_dissipative(
+                        controller_params.torch_to_np(),
+                        to_numpy(self.P)
+                    )
+                else:
+                    (
+                        is_dissipative,
+                        newP,
+                        newLambda,
+                        newMDeltapvv,
+                        newMDeltapvw,
+                        newMDeltapww,
+                    ) = self.theta_projector.is_dissipative2(
+                        controller_params.torch_to_np(),
+                        to_numpy(self.P), to_numpy(self.Lambda),
+                        self.MDeltapvv, self.MDeltapvw, self.MDeltapww
+                    )
                 print(f"Is dissipative: {is_dissipative}")
                 if is_dissipative:
                     self.P = from_numpy(newP)
                     self.Lambda = from_numpy(newLambda)
+                    if not self.fix_mdeltap:
+                        self.MDeltapvv = newMDeltapvv
+                        self.LDeltap = MDeltapvvToLDeltap(self.MDeltapvv)
+                        self.MDeltapvw = newMDeltapvw
+                        self.MDeltapww = newMDeltapww
+                        self.plant_params.MDeltapvv = from_numpy(self.MDeltapvv)
+                        self.plant_params.MDeltapvw = from_numpy(self.MDeltapvw)
+                        self.plant_params.MDeltapww = from_numpy(self.MDeltapww)
                 else:
                     self.enforce_thetahat_dissipativity()
             else:
@@ -343,7 +400,9 @@ class DissipativeSimplestRINN(RecurrentNetwork, nn.Module):
             },
             strict=False,
         )
-        assert unexpected == [], f"Loading unexpected key after projection: {unexpected}"
+        assert (
+            unexpected == []
+        ), f"Loading unexpected key after projection: {unexpected}"
         # fmt: off
         assert missing == [
             "log_stds", "value.0.bias", "value.0.weight_g", "value.0.weight_v",
@@ -365,9 +424,11 @@ class DissipativeSimplestRINN(RecurrentNetwork, nn.Module):
         thetahat = theta.torch_construct_thetahat(self.P, self.plant_params, self.eps)
 
         thetahat = thetahat.torch_to_np()
-        new_thetahat = self.thetahat_projector.project(thetahat)
-        new_thetahat = new_thetahat.np_to_torch(device=self.A_T.device)
+        new_thetahat = self.thetahat_projector.project(
+            thetahat, self.LDeltap, self.MDeltapvv, self.MDeltapvw, self.MDeltapww
+        )
 
+        new_thetahat = new_thetahat.np_to_torch(device=self.A_T.device)
         new_theta, P = new_thetahat.torch_construct_theta(self.plant_params, self.eps)
 
         self.P = P
@@ -375,7 +436,14 @@ class DissipativeSimplestRINN(RecurrentNetwork, nn.Module):
 
         try:
             theta.Lambda = self.Lambda
-            new_new_theta = self.theta_projector.project(theta.torch_to_np(), to_numpy(self.P))
+            new_new_theta = self.theta_projector.project(
+                theta.torch_to_np(),
+                to_numpy(self.P),
+                self.LDeltap,
+                self.MDeltapvv,
+                self.MDeltapvw,
+                self.MDeltapww,
+            )
             new_new_theta = new_new_theta.np_to_torch(device=self.A_T.device)
             print("Using second projection result for thetahat -> theta.")
         except Exception as _e:
@@ -399,7 +467,9 @@ class DissipativeSimplestRINN(RecurrentNetwork, nn.Module):
             },
             strict=False,
         )
-        assert unexpected == [], f"Loading unexpected key after projection: {unexpected}"
+        assert (
+            unexpected == []
+        ), f"Loading unexpected key after projection: {unexpected}"
         # fmt: off
         assert missing == [
             "log_stds", "value.0.bias", "value.0.weight_g", "value.0.weight_v",
@@ -499,7 +569,9 @@ class DissipativeSimplestRINN(RecurrentNetwork, nn.Module):
                 wk, info = self.deq(delta_tilde, wk0)
                 assert len(wk) > 0
                 wk = wk[-1]
-            assert not torch.any(torch.isnan(wk)), f"At time {k}, wk has nans: {wk}, {info}"
+            assert not torch.any(
+                torch.isnan(wk)
+            ), f"At time {k}, wk has nans: {wk}, {info}"
 
             uk = xk @ self.Cu_T + wk @ self.Duw_T + yk @ self.Duy_T
             actions[:, k] = uk

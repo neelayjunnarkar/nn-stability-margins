@@ -1,6 +1,6 @@
 # Dissipative code using the condition that is a BMI in controller parameters and storage function.
-import enum
 import time
+import copy
 
 import cvxpy as cp
 import numpy as np
@@ -36,7 +36,10 @@ def is_positive_definite(X):
 def construct_dissipativity_matrix(
     A, Bw, Bd, Cv, Dvw, Dvd, Ce, Dew, Ded, P, LDelta, Mvw, Mww, Xdd, Xde, LX, stacker
 ):
-    """Constructs dissipativity condition from closed-loop matrices."""
+    """
+    Constructs a dissipativity condition from closed-loop matrices.
+    This condition is bilinear in controller variables and the certificates P and M
+    """
     if stacker == "numpy":
         stacker = np.bmat
     elif stacker == "cvxpy":
@@ -83,11 +86,61 @@ def construct_dissipativity_matrix(
     return mat
 
 
+def construct_verification_matrix(
+    A, Bw, Bd, Cv, Dvw, Dvd, Ce, Dew, Ded, P, Mvv, Mvw, Mww, Xdd, Xde, Xee, stacker
+):
+    """
+    Constructs simple verification of dissipativity condition from closed-loop matrices.
+    Importantly, this condition is linear in P and M.
+    """
+    if stacker == "numpy":
+        stacker = np.bmat
+    elif stacker == "cvxpy":
+        stacker = cp.bmat
+    else:
+        raise ValueError(f"Stacker {stacker} must be 'numpy' or 'cvxpy'.")
+
+    # F = F1 + F2 + F3
+    # where F1 has A^T P + P A, F2 is term with M, and F3 is term with X
+
+    # fmt: off
+    F1 = stacker([
+        [A.T @ P + P @ A, P @ Bw, P @ Bd],
+        [Bw.T @ P, np.zeros((Bw.shape[1], Bw.shape[1] + Bd.shape[1]))],
+        [Bd.T @ P, np.zeros((Bd.shape[1], Bw.shape[1] + Bd.shape[1]))]
+    ])
+
+    F2R = stacker([
+        [Cv, Dvw, Dvd],
+        [np.zeros((Dvw.shape[1], Cv.shape[1])), np.eye(Dvw.shape[1]), np.zeros((Dvw.shape[1], Dvd.shape[1]))]
+    ])
+    F2M = stacker([
+        [Mvv, Mvw],
+        [Mvw.T, Mww]
+    ])
+    F2 = F2R.T @ F2M @ F2R
+
+    F3R = stacker([
+        [np.zeros((Ded.shape[1], Ce.shape[1] + Dew.shape[1])), np.eye(Ded.shape[1])],
+        [Ce, Dew, Ded]
+    ])
+    F3M = stacker([
+        [Xdd, Xde],
+        [Xde.T, Xee]
+    ])
+    F3 = -F3R.T @ F3M @ F3R
+
+    F = F1 + F2 + F3
+    # fmt: on
+
+    return F
+
+
 def construct_closed_loop(
     plant_params: PlantParameters,
-    LDeltap,
     controller_params: ControllerThetaParameters,
     stacker,
+    LDeltap=None,
 ):
     Ap = plant_params.Ap
     Bpw = plant_params.Bpw
@@ -160,11 +213,18 @@ def construct_closed_loop(
         [Dped + Dpeu @ Dkuy @ Dpyd]
     ])
 
-    LDelta = np.bmat([
-        [LDeltap, np.zeros((LDeltap.shape[0], Lambda.shape[1]))],
-        [np.zeros((Lambda.shape[0], LDeltap.shape[1] + Lambda.shape[1]))]
-    ])
+    if LDeltap is not None:
+        LDelta = stacker([
+            [LDeltap, np.zeros((LDeltap.shape[0], Lambda.shape[1]))],
+            [np.zeros((Lambda.shape[0], LDeltap.shape[1] + Lambda.shape[1]))]
+        ])
+    else:
+        LDelta = None
 
+    Mvv = stacker([
+        [MDeltapvv, np.zeros((MDeltapvv.shape[0], Lambda.shape[1]))],
+        [np.zeros((Lambda.shape[0], MDeltapvv.shape[1] + Lambda.shape[1]))]
+    ])
     Mvw = stacker([
         [MDeltapvw, np.zeros((MDeltapvv.shape[0], Lambda.shape[1]))],
         [np.zeros((Lambda.shape[0], MDeltapvw.shape[1])), Lambda]
@@ -175,7 +235,7 @@ def construct_closed_loop(
     ])
     # fmt: on
 
-    return A, Bw, Bd, Cv, Dvw, Dvd, Ce, Dew, Ded, LDelta, Mvw, Mww
+    return A, Bw, Bd, Cv, Dvw, Dvd, Ce, Dew, Ded, LDelta, Mvv, Mvw, Mww
 
 
 class Projector:
@@ -191,6 +251,8 @@ class Projector:
         output_size,
         state_size,
         input_size,
+        # A function takes in epsilon and returns (MDeltapvv, MDeltapvw, MDeltapww, [variables] [constraints])
+        plant_uncertainty_constraints=None,
     ):
         self.plant_params = plant_params
         self.eps = eps
@@ -207,8 +269,14 @@ class Projector:
         Dx, Vx = np.linalg.eigh(-plant_params.Xee)
         self.LX = np.diag(np.sqrt(Dx)) @ Vx.T
 
+        self.plant_uncertainty_constraints = plant_uncertainty_constraints
+
         self._construct_projection_problem()
+
         self._construct_check_dissipativity_problem()
+        if self.plant_uncertainty_constraints is not None:
+            self._construct_check_dissipativity_problem2()
+            
 
     def _construct_projection_problem(self):
         # Define projection problem: Projecting theta into BMI parameterized by P and Lambda.
@@ -233,6 +301,22 @@ class Projector:
         )
         # fmt: on
 
+        # Enable using the most up-to-date MDeltap during each projection
+        self.pproj_LDeltap = cp.Parameter(self.LDeltap.shape)
+        # TODO: is specifying symmetric creating numerical problems?
+        self.pproj_MDeltapvv = cp.Parameter(
+            self.plant_params.MDeltapvv.shape, symmetric=True
+        )
+        self.pproj_MDeltapvw = cp.Parameter(self.plant_params.MDeltapvw.shape)
+        self.pproj_MDeltapww = cp.Parameter(
+            self.plant_params.MDeltapww.shape,
+            symmetric=True,
+        )
+        plant_params = copy.copy(self.plant_params)
+        plant_params.MDeltapvv = self.pproj_MDeltapvv
+        plant_params.MDeltapvw = self.pproj_MDeltapvw
+        plant_params.MDeltapww = self.pproj_MDeltapww
+
         # Variables
         vprojAk = cp.Variable((self.state_size, self.state_size))
         vprojBkw = cp.Variable((self.state_size, self.nonlin_size))
@@ -253,8 +337,8 @@ class Projector:
             vprojAk, vprojBkw, vprojBky, vprojCkv, vprojDkvw, vprojDkvy,
             vprojCku, vprojDkuw, vprojDkuy, self.pproj_k.Lambda
         )
-        A, Bw, Bd, Cv, Dvw, Dvd, Ce, Dew, Ded, LDelta, Mvw, Mww = construct_closed_loop(
-            self.plant_params, self.LDeltap, controller_params, "cvxpy"
+        A, Bw, Bd, Cv, Dvw, Dvd, Ce, Dew, Ded, LDelta, Mvv, Mvw, Mww = construct_closed_loop(
+            plant_params, controller_params, "cvxpy", LDeltap=self.pproj_LDeltap
         )
         mat = construct_dissipativity_matrix(
             A, Bw, Bd, Cv, Dvw, Dvd, Ce, Dew, Ded, self.pprojP,
@@ -307,6 +391,10 @@ class Projector:
         self,
         controller_params: ControllerThetaParameters,
         P,
+        LDeltap,
+        MDeltapvv,
+        MDeltapvw,
+        MDeltapww,
         solver=cp.MOSEK,
         **kwargs,
     ):
@@ -322,10 +410,20 @@ class Projector:
         self.pproj_k.Dkuy.value = controller_params.Dkuy
         self.pproj_k.Lambda.value = controller_params.Lambda
         self.pprojP.value = P
+        self.pproj_LDeltap.value = LDeltap
+        self.pproj_MDeltapvv.value = MDeltapvv
+        self.pproj_MDeltapvw.value = MDeltapvw
+        self.pproj_MDeltapww.value = MDeltapww
+        print("\n\n")
+        print(f"Theta project LDeltap: {LDeltap}")
+        print(f"Theta project MDeltapvv: {MDeltapvv}")
+        print(f"Theta project MDeltapvw: {MDeltapvw}")
+        print(f"Theta project MDeltapww: {MDeltapww}")
+        print("\n\n")
 
         try:
             # t0 = time.perf_counter()
-            self.proj_problem.solve(enforce_dpp=True, solver=solver, **kwargs)
+            self.proj_problem.solve(enforce_dpp=False, solver=solver, **kwargs)
             # t1 = time.perf_counter()
             # print(f"Projection solving took {t1-t0} seconds.")
         except Exception as e:
@@ -388,8 +486,8 @@ class Projector:
             pcheckAk, pcheckBkw, pcheckBky, pcheckCkv, pcheckDkvw, pcheckDkvy,
             pcheckCku, pcheckDkuw, pcheckDkuy, self.vcheckLambda
         )
-        A, Bw, Bd, Cv, Dvw, Dvd, Ce, Dew, Ded, LDelta, Mvw, Mww = construct_closed_loop(
-            self.plant_params, self.LDeltap, controller_params, "cvxpy"
+        A, Bw, Bd, Cv, Dvw, Dvd, Ce, Dew, Ded, LDelta, Mvv, Mvw, Mww = construct_closed_loop(
+            self.plant_params, controller_params, "cvxpy", LDeltap=self.LDeltap
         )
         mat = construct_dissipativity_matrix(
             A, Bw, Bd, Cv, Dvw, Dvd, Ce, Dew, Ded, self.vcheckP,
@@ -471,6 +569,180 @@ class Projector:
 
         return True, newP, newLambda
 
+    def _construct_check_dissipativity_problem2(self):
+        # Define dissipativity verification problem: find if there exist P and Lambda and MDeltap
+        # that certify a given controller is dissipative.
+        # Parameters
+        plant_state_size = self.plant_params.Ap.shape[0]
+        P_size = plant_state_size + self.state_size
+        pcheck2Ak = cp.Parameter((self.state_size, self.state_size))
+        pcheck2Bkw = cp.Parameter((self.state_size, self.nonlin_size))
+        pcheck2Bky = cp.Parameter((self.state_size, self.input_size))
+        pcheck2Ckv = cp.Parameter((self.nonlin_size, self.state_size))
+        pcheck2Dkvw = cp.Parameter((self.nonlin_size, self.nonlin_size))
+        pcheck2Dkvy = cp.Parameter((self.nonlin_size, self.input_size))
+        pcheck2Cku = cp.Parameter((self.output_size, self.state_size))
+        pcheck2Dkuw = cp.Parameter((self.output_size, self.nonlin_size))
+        pcheck2Dkuy = cp.Parameter((self.output_size, self.input_size))
+        # fmt: off
+        self.pcheck2_k = ControllerThetaParameters(
+            pcheck2Ak, pcheck2Bkw, pcheck2Bky, pcheck2Ckv, pcheck2Dkvw, pcheck2Dkvy,
+            pcheck2Cku, pcheck2Dkuw, pcheck2Dkuy, None
+        )
+        # fmt: on
+        self.pcheck2P = cp.Parameter((P_size, P_size), PSD=True)
+        self.pcheck2Lambda = cp.Parameter(
+            (self.nonlin_size, self.nonlin_size), diag=True
+        )
+        self.pcheck2MDeltapvv = cp.Parameter(
+            (
+                self.plant_params.MDeltapvv.shape[0],
+                self.plant_params.MDeltapvv.shape[1],
+            ),
+            symmetric=True,
+        )
+        self.pcheck2MDeltapvw = cp.Parameter(
+            (self.plant_params.MDeltapvw.shape[0], self.plant_params.MDeltapvw.shape[1])
+        )
+        self.pcheck2MDeltapww = cp.Parameter(
+            (
+                self.plant_params.MDeltapww.shape[0],
+                self.plant_params.MDeltapww.shape[1],
+            ),
+            symmetric=True,
+        )
+
+        # Variables
+        self.vcheck2P = cp.Variable((P_size, P_size), PSD=True)
+        self.vcheck2Lambda = cp.Variable((self.nonlin_size, self.nonlin_size), diag=True)
+        self.vcheck2Eps = cp.Variable(nonneg=True)
+        assert self.plant_uncertainty_constraints is not None
+        MDeltapvv, MDeltapvw, MDeltapww, _, MDeltap_constraints = (
+            self.plant_uncertainty_constraints(self.eps)
+        )
+        self.vcheck2MDeltapvv = MDeltapvv
+        self.vcheck2MDeltapvw = MDeltapvw
+        self.vcheck2MDeltapww = MDeltapww
+        # Shallow copy plant_params to override MDeltap
+        plant_params = copy.copy(self.plant_params)
+        plant_params.MDeltapvv = self.vcheck2MDeltapvv
+        plant_params.MDeltapvw = self.vcheck2MDeltapvw
+        plant_params.MDeltapww = self.vcheck2MDeltapww
+
+        # fmt: off
+        controller_params = ControllerThetaParameters(
+            pcheck2Ak, pcheck2Bkw, pcheck2Bky, pcheck2Ckv, pcheck2Dkvw, pcheck2Dkvy,
+            pcheck2Cku, pcheck2Dkuw, pcheck2Dkuy, self.vcheck2Lambda
+        )
+        A, Bw, Bd, Cv, Dvw, Dvd, Ce, Dew, Ded, _LDelta, Mvv, Mvw, Mww = construct_closed_loop(
+            plant_params, controller_params, "cvxpy"
+        )
+        mat = construct_verification_matrix(
+            A, Bw, Bd, Cv, Dvw, Dvd, Ce, Dew, Ded, self.vcheck2P,
+            Mvv, Mvw, Mww,
+            self.plant_params.Xdd, self.plant_params.Xde, self.plant_params.Xee,
+            "cvxpy"
+        )
+        # fmt: on
+
+        constraints = [
+            self.vcheck2P >> self.eps * np.eye(self.vcheck2P.shape[0]),
+            self.vcheck2Lambda >> self.eps * np.eye(self.vcheck2Lambda.shape[0]),
+            # Well-posedness condition Lambda Dkvw + Dkvw^T Lambda - 2 Lambda < 0
+            self.vcheck2Lambda @ pcheck2Dkvw
+            + pcheck2Dkvw.T @ self.vcheck2Lambda
+            - 2 * self.vcheck2Lambda
+            << -self.eps * np.eye(self.vcheck2Lambda.shape[0]),
+            # Dissipativity condition
+            mat << -self.vcheck2Eps,
+            self.vcheck2Eps >= 0,
+        ] + MDeltap_constraints
+        objective = -self.vcheck2Eps
+
+        # TODO: this is a test to regulate size of MDeltap
+        objective += cp.sum(
+            [
+                cp.sum_squares(v - p)
+                for (v, p) in [
+                    (self.vcheck2P, self.pcheck2P),
+                    (self.vcheck2Lambda, self.pcheck2Lambda),
+                    (self.vcheck2MDeltapvv, self.pcheck2MDeltapvv),
+                    (self.vcheck2MDeltapvw, self.pcheck2MDeltapvw),
+                    (self.vcheck2MDeltapww, self.pcheck2MDeltapww)
+                ]
+            ]
+        )
+
+        self.check2_problem = cp.Problem(cp.Minimize(objective), constraints)
+
+    def is_dissipative2(
+        self,
+        controller_params: ControllerThetaParameters,
+        P,
+        Lambda,
+        MDeltapvv, MDeltapvw, MDeltapww,
+        solver=cp.MOSEK,
+        **kwargs,
+    ):
+        """Checks if there exist P, Lambda, and MDeltap that certify the controller is dissipative."""
+        self.pcheck2_k.Ak.value = controller_params.Ak
+        self.pcheck2_k.Bkw.value = controller_params.Bkw
+        self.pcheck2_k.Bky.value = controller_params.Bky
+        self.pcheck2_k.Ckv.value = controller_params.Ckv
+        self.pcheck2_k.Dkvw.value = controller_params.Dkvw
+        self.pcheck2_k.Dkvy.value = controller_params.Dkvy
+        self.pcheck2_k.Cku.value = controller_params.Cku
+        self.pcheck2_k.Dkuw.value = controller_params.Dkuw
+        self.pcheck2_k.Dkuy.value = controller_params.Dkuy
+        self.pcheck2P.value = P
+        self.pcheck2Lambda.value = Lambda
+        self.pcheck2MDeltapvv.value = MDeltapvv
+        self.pcheck2MDeltapvw.value = MDeltapvw
+        self.pcheck2MDeltapww.value = MDeltapww
+
+        try:
+            t0 = time.perf_counter()
+            self.check2_problem.solve(enforce_dpp=False, solver=solver, **kwargs)
+            t1 = time.perf_counter()
+            # print(f"Projection solving took {t1-t0} seconds.")
+        except Exception as e:
+            print(f"Failed to solve: {e}")
+            return False, None, None, None, None, None
+
+        feas_stats = [
+            cp.OPTIMAL,
+            cp.UNBOUNDED,
+            cp.OPTIMAL_INACCURATE,
+            cp.UNBOUNDED_INACCURATE,
+        ]
+        if self.check2_problem.status not in feas_stats:
+            print(f"Failed to solve with status {self.check2_problem.status}")
+            return False, None, None, None, None, None
+        # print(f"Projection objective: {self.check2_problem.value}")
+
+        newP = self.vcheck2P.value
+        newLambda = self.vcheck2Lambda.value.toarray()
+        if isinstance(self.vcheck2MDeltapvv, np.ndarray):
+            newMDeltapvv = self.vcheck2MDeltapvv
+        else:
+            newMDeltapvv = self.vcheck2MDeltapvv.value.toarray()
+        if isinstance(self.vcheck2MDeltapvw, np.ndarray):
+            newMDeltapvw = self.vcheck2MDeltapvw
+        else:
+            newMDeltapvw = self.vcheck2MDeltapvw.value.toarray()
+        if isinstance(self.vcheck2MDeltapww, np.ndarray):
+            newMDeltapww = self.vcheck2MDeltapww
+        else:
+            newMDeltapww = self.vcheck2MDeltapww.value.toarray()
+
+        # print(f"newP: {newP}")
+        # print(f"newLambda: {newLambda}")
+        print("Found new MDeltap:")
+        print(f"newMDeltapvv: {newMDeltapvv}")
+        print(f"newMDeltapvw: {newMDeltapvw}")
+        print(f"newMDeltapww: {newMDeltapww}")
+        return True, newP, newLambda, newMDeltapvv, newMDeltapvw, newMDeltapww
+
 
 class LTIProjector:
     """Projection and verification related to dissipativity BMI, with LTI controller."""
@@ -513,14 +785,18 @@ class LTIProjector:
         pprojBky = cp.Parameter((self.state_size, self.input_size))
         pprojCku = cp.Parameter((self.output_size, self.state_size))
         pprojDkuy = cp.Parameter((self.output_size, self.input_size))
-        self.pproj_k = ControllerLTIThetaParameters(pprojAk, pprojBky, pprojCku, pprojDkuy)
+        self.pproj_k = ControllerLTIThetaParameters(
+            pprojAk, pprojBky, pprojCku, pprojDkuy
+        )
 
         # Variables
         vprojAk = cp.Variable((self.state_size, self.state_size))
         vprojBky = cp.Variable((self.state_size, self.input_size))
         vprojCku = cp.Variable((self.output_size, self.state_size))
         vprojDkuy = cp.Variable((self.output_size, self.input_size))
-        self.vproj_k = ControllerLTIThetaParameters(vprojAk, vprojBky, vprojCku, vprojDkuy)
+        self.vproj_k = ControllerLTIThetaParameters(
+            vprojAk, vprojBky, vprojCku, vprojDkuy
+        )
 
         Bkw = np.zeros((self.state_size, self.nonlin_size))
         Ckv = np.zeros((self.nonlin_size, self.state_size))
@@ -532,8 +808,8 @@ class LTIProjector:
             vprojAk, Bkw, vprojBky, Ckv, Dkvw, Dkvy, vprojCku, Dkuw, vprojDkuy, Lambda
         )
         # fmt: off
-        A, Bw, Bd, Cv, Dvw, Dvd, Ce, Dew, Ded, LDelta, Mvw, Mww = construct_closed_loop(
-            self.plant_params, self.LDeltap, controller_params, "cvxpy",
+        A, Bw, Bd, Cv, Dvw, Dvd, Ce, Dew, Ded, LDelta, Mvv, Mvw, Mww = construct_closed_loop(
+            self.plant_params, controller_params, "cvxpy", LDeltap=self.LDeltap
         )
         mat = construct_dissipativity_matrix(
             A, Bw, Bd, Cv, Dvw, Dvd, Ce, Dew, Ded, self.pprojP,
@@ -620,7 +896,9 @@ class LTIProjector:
         pcheckBky = cp.Parameter((self.state_size, self.input_size))
         pcheckCku = cp.Parameter((self.output_size, self.state_size))
         pcheckDkuy = cp.Parameter((self.output_size, self.input_size))
-        self.pcheck_k = ControllerLTIThetaParameters(pcheckAk, pcheckBky, pcheckCku, pcheckDkuy)
+        self.pcheck_k = ControllerLTIThetaParameters(
+            pcheckAk, pcheckBky, pcheckCku, pcheckDkuy
+        )
 
         # Variables
         self.vcheckP = cp.Variable((P_size, P_size), PSD=True)
@@ -633,11 +911,20 @@ class LTIProjector:
         Dkuw = np.zeros((self.output_size, self.nonlin_size))
         Lambda = np.zeros((self.nonlin_size, self.nonlin_size))
         controller_params = ControllerThetaParameters(
-            pcheckAk, Bkw, pcheckBky, Ckv, Dkvw, Dkvy, pcheckCku, Dkuw, pcheckDkuy, Lambda
+            pcheckAk,
+            Bkw,
+            pcheckBky,
+            Ckv,
+            Dkvw,
+            Dkvy,
+            pcheckCku,
+            Dkuw,
+            pcheckDkuy,
+            Lambda,
         )
         # fmt: off
-        A, Bw, Bd, Cv, Dvw, Dvd, Ce, Dew, Ded, LDelta, Mvw, Mww = construct_closed_loop(
-            self.plant_params, self.LDeltap, controller_params, "cvxpy"
+        A, Bw, Bd, Cv, Dvw, Dvd, Ce, Dew, Ded, LDelta, Mvv, Mvw, Mww = construct_closed_loop(
+            self.plant_params, controller_params, "cvxpy", LDeltap=self.LDeltap
         )
         mat = construct_dissipativity_matrix(
             A, Bw, Bd, Cv, Dvw, Dvd, Ce, Dew, Ded, self.vcheckP,

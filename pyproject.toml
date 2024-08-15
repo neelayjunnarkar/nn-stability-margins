@@ -19,7 +19,6 @@ protobuf = "<3.21"
 torchdeq = "^0.1.0"
 numpy = "1.21.5"
 importlib-metadata = "^7.0.0"
-slycot = "^0.5.4"
 control = "^0.9.4"
 
 

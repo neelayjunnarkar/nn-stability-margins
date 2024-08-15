@@ -25,7 +25,10 @@ This code is tested with Python 3.10.10 and PyTorch 1.11.
 ## Setup
 
 * `poetry install`
-* Above will install some items then error. Run `poetry run pip install gym==0.21`
+* Above will install some items then error. 
+* Run `poetry run pip install setuptools==65.5.0 pip==21`
+* Run `poetry run pip install wheel==0.38.0`
+* Run `poetry run pip install gym==0.21`
 * Now run `poetry install` again 
 
 Then, controller training can be run with `poetry run python train_controller.py`

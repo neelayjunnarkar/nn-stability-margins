@@ -9,15 +9,6 @@ class DiskMarginExampleEnv(disk_margin_base.DiskMarginBaseEnv):
     """
 
     def __init__(self, env_config):
-        # Ap = np.array([[0, 1, 0], [0, 0, 1], [0, -2, -3]], dtype=np.float32)
-        # Bpd = np.array([[0], [0], [2]], dtype=np.float32)
-        # Bpu = Bpd
-        # Cpe = np.eye(3, dtype=np.float32)
-        # Dped = np.zeros((3, 1), dtype=np.float32)
-        # Dpeu = np.zeros((3, 1), dtype=np.float32)
-        # Cpy = np.array([[1, 0, 0]], dtype=np.float32)
-        # Dpyd = np.zeros((1, 1), dtype=np.float32)
-
         Ap = np.array([
             [-3, 0, 0],
             [1, 0, 0],

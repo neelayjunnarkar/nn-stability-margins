@@ -12,7 +12,7 @@ import torch
 from ray import tune
 from ray.rllib.agents.ppo import PPOTrainer
 
-from envs import FlexibleArmEnv, InvertedPendulumEnv, TimeDelayInvertedPendulumEnv, DiskMarginExampleEnv
+from envs import FlexibleArmEnv, InvertedPendulumEnv, TimeDelayInvertedPendulumEnv, DiskMarginExampleEnv, FlexibleArmDiskMarginEnv
 
 import lti_controllers
 
@@ -36,7 +36,7 @@ if use_savio:
 else:
     # N_CPUS = 1 # test
     # N_CPUS = 2 # test
-    N_CPUS = multiprocessing.cpu_count() / 2
+    N_CPUS = multiprocessing.cpu_count()
 n_tasks = 1
 n_workers_per_task = int(math.floor(N_CPUS / n_tasks)) - 1 - 1
 
@@ -93,13 +93,24 @@ seed = 0
 #     "supplyrate_scale": 1,
 #     "lagrange_multiplier": 1000,
 # }
+# dt = 0.001
+# env = DiskMarginExampleEnv
+# env_config = {
+#     "dt": dt,
+#     "seed": seed,
+# }
 dt = 0.001
-env = DiskMarginExampleEnv
+env = FlexibleArmDiskMarginEnv
 env_config = {
     "dt": dt,
     "seed": seed,
+    "normed": True,
+    "rollout_length": int(2 / dt) - 1,
+    "disturbance_model": "occasional",
+    "disk_margin_type": "6dB36deg",
+    # "skew": 0,
+    # "alpha": 0,
 }
-
 
 # Configure the algorithm.
 config = {
@@ -151,7 +162,7 @@ config = {
         # },
         "custom_model": DissipativeSimplestRINN,
         "custom_model_config": {
-            "state_size": 3,
+            "state_size": 2,
             "nonlin_size": 16,
             "log_std_init": np.log(1.0),
             "dt": dt,
@@ -161,12 +172,12 @@ config = {
             "mode": "thetahat",
             "trs_mode": "fixed",
             "min_trs": 1,
-            "backoff_factor": 1.1,
+            "backoff_factor": 1.05,
             "lti_initializer": "dissipative_thetahat",
             "lti_initializer_kwargs": {
                 "trs_mode": "fixed",
                 "min_trs": 1,
-                "backoff_factor": 1.1,
+                "backoff_factor": 1.05,
             },
             "fix_mdeltap": False
         },
@@ -233,7 +244,7 @@ results = tune.run(
     ProjectedPPOTrainer,
     config=config,
     stop={
-        "agent_timesteps_total": 1e6,
+        "agent_timesteps_total": 1e7,
     },
     verbose=1,
     trial_name_creator=name_creator,

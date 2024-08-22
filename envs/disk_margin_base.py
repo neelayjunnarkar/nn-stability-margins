@@ -4,6 +4,7 @@ from gym.utils import seeding
 from variable_structs import PlantParameters
 import cvxpy as cp
 
+
 class DiskMarginBaseEnv(gym.Env):
     """
     A base class for implenting LTI plants with disk margin uncertainty at the input.
@@ -66,6 +67,7 @@ class DiskMarginBaseEnv(gym.Env):
             variables = [Lambda]
             constraints = [Lambda >> 0]
             return (MDeltapvv, MDeltapvw, MDeltapww, variables, constraints)
+
         self.plant_uncertainty_constraints = plant_uncertainty_constraints
 
         self.seed(env_config["seed"] if "seed" in env_config else None)
@@ -101,9 +103,12 @@ class DiskMarginBaseEnv(gym.Env):
 
         return state
 
+    def disturbance(self):
+        return np.zeros(self.nd, dtype=np.float32)
+
     def step(self, u, fail_on_state_space=True, fail_on_time_limit=True):
         u = np.clip(u, self.action_space.low, self.action_space.high)
-        d = np.zeros(self.nd, dtype=np.float32)
+        d = self.disturbance()
         self.state = self.next_state(self.state, d, u)
         reward = self.compute_reward(self.state, u)
 

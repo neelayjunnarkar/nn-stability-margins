@@ -21,7 +21,7 @@ from models import (
     RNN,
     DissipativeRINN,
     DissipativeSimplestRINN,
-    DissipativeThetaRINN,
+    # DissipativeThetaRINN,
     FullyConnectedNetwork,
     ImplicitModel,
     LTIModel,

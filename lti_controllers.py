@@ -92,6 +92,11 @@ def construct_theta(thetahat: ControllerLTIThetahatParameters, plant_params: Pla
     return controller, P
 
 
+def MDeltapvvToLDeltap(MDeltapvv):
+    Dm, Vm = np.linalg.eigh(MDeltapvv)
+    LDeltap = np.diag(np.sqrt(Dm)) @ Vm.T
+    return LDeltap
+
 def dissipative_thetahat(
     plant_params: PlantParameters,
     # Epsilon to be used in enforcing definiteness of conditions
@@ -130,7 +135,11 @@ def dissipative_thetahat(
         NA21=np.zeros((output_size, state_size)),
         NA22=np.zeros((output_size, input_size)),
     )
-    thetahat = projector.project(thetahat0)
+    LDeltap = MDeltapvvToLDeltap(plant_params.MDeltapvv)
+    MDeltapvv = plant_params.MDeltapvv
+    MDeltapvw = plant_params.MDeltapvw
+    MDeltapww = plant_params.MDeltapww
+    thetahat = projector.project(thetahat0, LDeltap, MDeltapvv, MDeltapvw, MDeltapww)
     controller, P = construct_theta(thetahat, plant_params)
 
     return controller, {"P": P, "thetahat": thetahat}

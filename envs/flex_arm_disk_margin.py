@@ -105,7 +105,7 @@ class FlexibleArmDiskMarginEnv(disk_margin_base.DiskMarginBaseEnv):
         self.time_max = (
             env_config["rollout_length"] if "rollout_length" in env_config else 1000
         )
-        self.max_reward = 1.0
+        self.max_reward = 2.0
 
         # Stability
         self.Xdd = np.zeros((self.nd, self.nd), dtype=np.float32)
@@ -118,7 +118,10 @@ class FlexibleArmDiskMarginEnv(disk_margin_base.DiskMarginBaseEnv):
         # self.Xee = -np.eye(self.ne, dtype=np.float32)
 
     def compute_reward(self, x, u):
-        return np.exp(-(np.linalg.norm(u) ** 2))
+        reward_state = np.exp(-(np.linalg.norm(self.state) ** 2))
+        reward_control = np.exp(-(np.linalg.norm(u) ** 2))
+        reward = reward_state + reward_control
+        return reward
 
     def random_initial_state(self):
         high = np.array(

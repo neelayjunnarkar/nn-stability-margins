@@ -25,10 +25,16 @@ def print_norms(X, name):
     )
 
 
+def MDeltapvvToLDeltap(MDeltapvv):
+    Dm, Vm = np.linalg.eigh(MDeltapvv)
+    LDeltap = np.diag(np.sqrt(Dm)) @ Vm.T
+    return LDeltap
+
+
 class LTIModel(RecurrentNetwork, nn.Module):
     """
     An LTI controller of the following form
-    
+
     xdot(t) = A  x(t) + By  y(t)
     u(t)    = Cu x(t) + Duy y(t)
 
@@ -46,6 +52,7 @@ class LTIModel(RecurrentNetwork, nn.Module):
     #   log_std_init: Defaults to log(2)
     #   baseline_n_layers: Defaults to 2.
     #   baseline_size: Defaults to 64.
+    #   fix_mdeltap. Defaults to true.
     def __init__(
         self,
         obs_space,
@@ -65,7 +72,9 @@ class LTIModel(RecurrentNetwork, nn.Module):
             2 * action_space.shape[0] == num_outputs
         ), "Num outputs should be 2 * action dimension"
 
-        self.state_size = model_config["state_size"] if "state_size" in model_config else 16
+        self.state_size = (
+            model_config["state_size"] if "state_size" in model_config else 16
+        )
         self.input_size = obs_space.shape[0]
         self.output_size = action_space.shape[0]
 
@@ -89,7 +98,9 @@ class LTIModel(RecurrentNetwork, nn.Module):
             n_layers=model_config["baseline_n_layers"]
             if "baseline_n_layers" in model_config
             else 2,
-            size=model_config["baseline_size"] if "baseline_size" in model_config else 64,
+            size=model_config["baseline_size"]
+            if "baseline_size" in model_config
+            else 64,
         )
         self._cur_value = None
 
@@ -109,7 +120,9 @@ class LTIModel(RecurrentNetwork, nn.Module):
             )
 
         lti_controller_kwargs = (
-            model_config["lti_controller_kwargs"] if "lti_controller_kwargs" in model_config else {}
+            model_config["lti_controller_kwargs"]
+            if "lti_controller_kwargs" in model_config
+            else {}
         )
         lti_controller_kwargs["state_size"] = self.state_size
         lti_controller_kwargs["input_size"] = self.input_size
@@ -142,11 +155,28 @@ class LTIModel(RecurrentNetwork, nn.Module):
                 self.plant_params.Ap.shape[0] + self.state_size, device=self.A_T.device
             )
 
+        # Initialize values for MDeltap
+        self.LDeltap = MDeltapvvToLDeltap(np_plant_params.MDeltapvv)
+        self.MDeltapvv = np_plant_params.MDeltapvv
+        self.MDeltapvw = np_plant_params.MDeltapvw
+        self.MDeltapww = np_plant_params.MDeltapww
+        self.fix_mdeltap = (
+            model_config["fix_mdeltap"] if "fix_mdeltap" in model_config else True
+        )
+        print(f"MDeltaP fixed: {self.fix_mdeltap}")
+
         self.theta_projector = LTIThetaProjector(
-            np_plant_params, self.eps, self.output_size, self.state_size, self.input_size
+            np_plant_params,
+            self.eps,
+            self.output_size,
+            self.state_size,
+            self.input_size,
+            plant_uncertainty_constraints=plant.plant_uncertainty_constraints,
         )
 
-        trs_mode = model_config["trs_mode"] if "trs_mode" in model_config else "variable"
+        trs_mode = (
+            model_config["trs_mode"] if "trs_mode" in model_config else "variable"
+        )
         min_trs = model_config["min_trs"] if "min_trs" in model_config else 1.0
 
         self.thethat_projector = LTIThetahatProjector(
@@ -170,12 +200,31 @@ class LTIModel(RecurrentNetwork, nn.Module):
             controller_params = ControllerLTIThetaParameters(
                 self.A_T.t(), self.By_T.t(), self.Cu_T.t(), self.Duy_T.t()
             )
-            is_dissipative, P = self.theta_projector.is_dissipative(
-                controller_params.torch_to_np(), to_numpy(self.P)
-            )
+            if self.fix_mdeltap:
+                is_dissipative, newP = self.theta_projector.is_dissipative(
+                    controller_params.torch_to_np(), to_numpy(self.P)
+                )
+            else:
+                is_dissipative, newP, newMDeltapvv, newMDeltapvw, newMDeltapww = (
+                    self.theta_projector.is_dissipative2(
+                        controller_params.torch_to_np(),
+                        to_numpy(self.P),
+                        self.MDeltapvv,
+                        self.MDeltapvw,
+                        self.MDeltapww,
+                    )
+                )
             print(f"Is dissipative: {is_dissipative}")
             if is_dissipative:
-                self.P = from_numpy(P, device=self.P.device)
+                self.P = from_numpy(newP, device=self.P.device)
+                if not self.fix_mdeltap:
+                    self.MDeltapvv = newMDeltapvv
+                    self.LDeltap = MDeltapvvToLDeltap(self.MDeltapvv)
+                    self.MDeltapvw = newMDeltapvw
+                    self.MDeltapww = newMDeltapww
+                    self.plant_params.MDeltapvv = from_numpy(self.MDeltapvv)
+                    self.plant_params.MDeltapvw = from_numpy(self.MDeltapvw)
+                    self.plant_params.MDeltapww = from_numpy(self.MDeltapww)
             else:
                 self.enforce_dissipativity()
 
@@ -200,14 +249,23 @@ class LTIModel(RecurrentNetwork, nn.Module):
         thetahat = theta.torch_construct_thetahat(self.P, self.plant_params)
 
         thetahat = thetahat.torch_to_np()
-        new_thetahat = self.thethat_projector.project(thetahat)
+        new_thetahat = self.thethat_projector.project(
+            thetahat, self.LDeltap, self.MDeltapvv, self.MDeltapvw, self.MDeltapww
+        )
         new_thetahat = new_thetahat.np_to_torch(device=self.A_T.device)
 
         new_theta, P = new_thetahat.torch_construct_theta(self.plant_params)
         self.P = P
 
         try:
-            new_new_theta = self.theta_projector.project(theta.torch_to_np(), to_numpy(self.P))
+            new_new_theta = self.theta_projector.project(
+                theta.torch_to_np(),
+                to_numpy(self.P),
+                self.LDeltap,
+                self.MDeltapvv,
+                self.MDeltapvw,
+                self.MDeltapww,
+            )
             new_new_theta = new_new_theta.np_to_torch(device=self.A_T.device)
             print("Using second projection result for thetahat -> theta.")
         except Exception as _e:
@@ -225,7 +283,9 @@ class LTIModel(RecurrentNetwork, nn.Module):
             },
             strict=False,
         )
-        assert unexpected == [], f"Loading unexpected key after projection: {unexpected}"
+        assert (
+            unexpected == []
+        ), f"Loading unexpected key after projection: {unexpected}"
         # fmt: off
         assert missing ==  ['log_stds', 'value.0.weight', 'value.0.bias', 'value.2.weight', 'value.2.bias', 'value.4.weight', 'value.4.bias'], missing
         # fmt: on

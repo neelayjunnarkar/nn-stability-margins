@@ -179,7 +179,7 @@ config = {
                 "min_trs": 1,
                 "backoff_factor": 1.05,
             },
-            "fix_mdeltap": False
+            "fix_mdeltap": True
         },
         # "custom_model": LTIModel,
         # "custom_model_config": {
@@ -190,18 +190,21 @@ config = {
         #     "log_std_init": np.log(1.0),
         #     "state_size": 2,
         #     "trs_mode": "fixed",
-        #     "min_trs": 1.5,  # 1.5, # 1.44,
+        #     "min_trs": 1,  # 1.5, # 1.44,
+        #     "backoff_factor": 1.05,
         #     "lti_controller": "dissipative_thetahat",
         #     "lti_controller_kwargs": {
         #         "trs_mode": "fixed",
-        #         "min_trs": 1.5,  # 1.5 # 1.44
+        #         "min_trs": 1,  # 1.5 # 1.44
+        #         "backoff_factor": 1.05,
         #     },
+        #     "fix_mdeltap": True,
         # },
     },
     ## Testing changes to training parameters
     "sgd_minibatch_size": 2048,
     "train_batch_size": 20480,
-    "lr": 2e-4,
+    "lr": 1e-4,
     "num_envs_per_worker": 10,
     ## End test
     "seed": seed,

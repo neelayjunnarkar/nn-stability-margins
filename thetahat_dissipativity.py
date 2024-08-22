@@ -639,6 +639,16 @@ class LTIProjector:
             NA21=cp.Parameter((self.output_size, self.state_size)),
             NA22=cp.Parameter((self.output_size, self.input_size)),
         )
+        # Enable using the most up-to-date MDeltap during each projection
+        # TODO: is the symmetric specification here a numerical problem?
+        self.proj_pLDeltap = cp.Parameter((self.LDeltap.shape[0], self.LDeltap.shape[1]))
+        self.proj_pMDeltapvv = cp.Parameter((self.plant_params.MDeltapvv.shape[0], self.plant_params.MDeltapvv.shape[1]), symmetric=True)
+        self.proj_pMDeltapvw = cp.Parameter((self.plant_params.MDeltapvw.shape[0], self.plant_params.MDeltapvw.shape[1]))
+        self.proj_pMDeltapww = cp.Parameter((self.plant_params.MDeltapww.shape[0], self.plant_params.MDeltapww.shape[1]), symmetric=True)
+        plant_params = copy.copy(self.plant_params)
+        plant_params.MDeltapvv = self.proj_pMDeltapvv
+        plant_params.MDeltapvw = self.proj_pMDeltapvw
+        plant_params.MDeltapww = self.proj_pMDeltapww
 
         # Variables: This will be the solution of the projection.
         self.proj_vThetahat = ControllerLTIThetahatParameters(
@@ -665,8 +675,9 @@ class LTIProjector:
             Lambda=np.zeros((self.nonlin_size, self.nonlin_size)),
         )
         mat = construct_dissipativity_matrix(
-            plant_params=self.plant_params,
-            LDeltap=self.LDeltap,
+            plant_params=plant_params, # Use the copy
+            # LDeltap=self.LDeltap,
+            LDeltap=self.proj_pLDeltap,
             LX=self.LX,
             controller_params=controller_params,
             stacker="cvxpy",
@@ -725,6 +736,16 @@ class LTIProjector:
             NA21=cp.Parameter((self.output_size, self.state_size)),
             NA22=cp.Parameter((self.output_size, self.input_size)),
         )
+        # Enable using the most up-to-date MDeltap during each projection
+        self.backoff_pLDeltap = cp.Parameter((self.LDeltap.shape[0], self.LDeltap.shape[1]))
+        # TODO: is the symmetric specification here creating a numerical problem?
+        self.backoff_pMDeltapvv = cp.Parameter((self.plant_params.MDeltapvv.shape[0], self.plant_params.MDeltapvv.shape[1]), symmetric=True)
+        self.backoff_pMDeltapvw = cp.Parameter((self.plant_params.MDeltapvw.shape[0], self.plant_params.MDeltapvw.shape[1]))
+        self.backoff_pMDeltapww = cp.Parameter((self.plant_params.MDeltapww.shape[0], self.plant_params.MDeltapww.shape[1]), symmetric=True)
+        plant_params = copy.copy(self.plant_params)
+        plant_params.MDeltapvv = self.backoff_pMDeltapvv
+        plant_params.MDeltapvw = self.backoff_pMDeltapvw
+        plant_params.MDeltapww = self.backoff_pMDeltapww
         # Squared projection error
         self.backoff_optimal_projection_error = cp.Parameter(nonneg=True)
 
@@ -754,8 +775,9 @@ class LTIProjector:
             Lambda=np.zeros((self.nonlin_size, self.nonlin_size)),
         )
         mat = construct_dissipativity_matrix(
-            plant_params=self.plant_params,
-            LDeltap=self.LDeltap,
+            plant_params=plant_params, # Use copy
+            # LDeltap=self.LDeltap,
+            LDeltap=self.backoff_pLDeltap,
             LX=self.LX,
             controller_params=controller_params,
             stacker="cvxpy",
@@ -788,7 +810,7 @@ class LTIProjector:
         self.backoff_problem = cp.Problem(cp.Maximize(objective), constraints)
 
     def base_project(
-        self, controller_params: ControllerLTIThetahatParameters, solver=cp.MOSEK, **kwargs
+        self, controller_params: ControllerLTIThetahatParameters, LDeltap, MDeltapvv, MDeltapvw, MDeltapww, solver=cp.MOSEK, **kwargs
     ):
         """Projects input variables to set corresponding to dissipative controllers."""
         K = controller_params
@@ -798,6 +820,10 @@ class LTIProjector:
         self.proj_pThetahat.NA12.value = K.NA12
         self.proj_pThetahat.NA21.value = K.NA21
         self.proj_pThetahat.NA22.value = K.NA22
+        self.proj_pLDeltap.value = LDeltap
+        self.proj_pMDeltapvv.value = MDeltapvv
+        self.proj_pMDeltapvw.value = MDeltapvw
+        self.proj_pMDeltapww.value = MDeltapww
 
         try:
             # t0 = time.perf_counter()
@@ -830,11 +856,11 @@ class LTIProjector:
         return new_controller_params, {"value": self.proj_problem.value}
 
     def project(
-        self, controller_params: ControllerLTIThetahatParameters, solver=cp.MOSEK, **kwargs
+        self, controller_params: ControllerLTIThetahatParameters, LDeltap, MDeltapvv, MDeltapvw, MDeltapww, solver=cp.MOSEK, **kwargs
     ):
         """Projects input variables to set corresponding to dissipative controllers, allowing some suboptimality to improve conditioning."""
         # First solve projection to get optimal projection error
-        _, info = self.base_project(controller_params, solver=solver, **kwargs)
+        _, info = self.base_project(controller_params, LDeltap, MDeltapvv, MDeltapvw, MDeltapww, solver=solver, **kwargs)
         self.backoff_optimal_projection_error.value = info["value"]
 
         # Then solve backoff problem which allows some suboptimality in projection,
@@ -846,6 +872,10 @@ class LTIProjector:
         self.backoff_pThetahat.NA12.value = K.NA12
         self.backoff_pThetahat.NA21.value = K.NA21
         self.backoff_pThetahat.NA22.value = K.NA22
+        self.backoff_pLDeltap.value = LDeltap
+        self.backoff_pMDeltapvv.value = MDeltapvv
+        self.backoff_pMDeltapvw.value = MDeltapvw
+        self.backoff_pMDeltapww.value = MDeltapww
 
         try:
             # t0 = time.perf_counter()

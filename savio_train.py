@@ -50,7 +50,7 @@ n_workers_per_task = int(math.floor(N_CPUS / n_tasks)) - 1 - 1
 #     raise ValueError(f"Task ID {TASK_ID} unexpected.")
 # assert T is not None
 
-disk_margin_types = 2*(2*(2*["3db20deg"] + 2*["6db36deg"] + 2*["12db60deg"]) + [None, None])
+disk_margin_types = 2*(2*(2*["3dB20deg"] + 2*["6dB36deg"] + 2*["12dB60deg"]) + [None, None])
 assert len(disk_margin_types) == 28
 disk_margin_type = disk_margin_types[TASK_ID]
 

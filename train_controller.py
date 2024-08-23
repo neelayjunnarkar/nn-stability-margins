@@ -35,8 +35,8 @@ if use_savio:
     JOB_ID = os.getenv("SLURM_JOB_ID")
 else:
     # N_CPUS = 1 # test
-    # N_CPUS = 2 # test
-    N_CPUS = multiprocessing.cpu_count()
+    N_CPUS = 2 # test
+    # N_CPUS = multiprocessing.cpu_count()
 n_tasks = 1
 n_workers_per_task = int(math.floor(N_CPUS / n_tasks)) - 1 - 1
 
@@ -179,7 +179,7 @@ config = {
                 "min_trs": 1,
                 "backoff_factor": 1.05,
             },
-            "fix_mdeltap": True
+            "fix_mdeltap": False
         },
         # "custom_model": LTIModel,
         # "custom_model_config": {

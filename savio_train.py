@@ -50,7 +50,8 @@ n_workers_per_task = int(math.floor(N_CPUS / n_tasks)) - 1 - 1
 #     raise ValueError(f"Task ID {TASK_ID} unexpected.")
 # assert T is not None
 
-disk_margin_types = 2*(2*(2*["3dB20deg"] + 2*["6dB36deg"] + 2*["12dB60deg"]) + [None, None])
+# The last "3dB20deg"s are for the unconstrained controllers, which will ignore it
+disk_margin_types = 2*(2*(2*["3dB20deg"] + 2*["6dB36deg"] + 2*["12dB60deg"]) + ["3dB20deg", "3dB20deg"])
 assert len(disk_margin_types) == 28
 disk_margin_type = disk_margin_types[TASK_ID]
 
@@ -245,7 +246,7 @@ def name_creator(trial):
     config = trial.config
     name = f"{config['env'].__name__}"
     name += f"_{config['model']['custom_model'].__name__}"
-    name += f"_{JOB_ID}_{TASK_ID}"
+    name += f"JOB{JOB_ID}_TASK{TASK_ID}_SEED{SEED}"
     return name
 
 

@@ -174,7 +174,9 @@ class DissipativeSimplestRINN(RecurrentNetwork, nn.Module):
         self.MDeltapvv = np_plant_params.MDeltapvv
         self.MDeltapvw = np_plant_params.MDeltapvw
         self.MDeltapww = np_plant_params.MDeltapww
-        self.fix_mdeltap = model_config["fix_mdeltap"] if "fix_mdeltap" in model_config else True
+        self.fix_mdeltap = (
+            model_config["fix_mdeltap"] if "fix_mdeltap" in model_config else True
+        )
         print(f"MDeltaP fixed: {self.fix_mdeltap}")
 
         lti_initializer = (
@@ -314,9 +316,10 @@ class DissipativeSimplestRINN(RecurrentNetwork, nn.Module):
                 #     controller_params.torch_to_np(), to_numpy(self.P)
                 # )
                 if self.fix_mdeltap:
-                    is_dissipative, newP, newLambda = self.theta_projector.is_dissipative(
-                        controller_params.torch_to_np(),
-                        to_numpy(self.P)
+                    is_dissipative, newP, newLambda = (
+                        self.theta_projector.is_dissipative(
+                            controller_params.torch_to_np(), to_numpy(self.P)
+                        )
                     )
                 else:
                     (
@@ -328,8 +331,11 @@ class DissipativeSimplestRINN(RecurrentNetwork, nn.Module):
                         newMDeltapww,
                     ) = self.theta_projector.is_dissipative2(
                         controller_params.torch_to_np(),
-                        to_numpy(self.P), to_numpy(self.Lambda),
-                        self.MDeltapvv, self.MDeltapvw, self.MDeltapww
+                        to_numpy(self.P),
+                        to_numpy(self.Lambda),
+                        self.MDeltapvv,
+                        self.MDeltapvw,
+                        self.MDeltapww,
                     )
                 print(f"Is dissipative: {is_dissipative}")
                 if is_dissipative:
@@ -364,13 +370,13 @@ class DissipativeSimplestRINN(RecurrentNetwork, nn.Module):
         # print_norms(self.Cu_T.t(), "Cku  ")
         # print_norms(self.Duw_T.t(), "Dkuw ")
         # print_norms(self.Duy_T.t(), "Dkuy ")
-        print_norms(theta, "theta")
+        # print_norms(theta, "theta")
         if self.oldtheta is not None:
             print_norms(theta - self.oldtheta, "theta - oldtheta")
         self.oldtheta = theta.detach().clone()
 
     def enforce_dissipativity(self):
-        """Projects current theta parameters to ones that are certified by P and Lambda."""
+        """Projects current theta parameters to ones that are certified by P, Lambda, and MDeltap."""
 
         # fmt: off
         controller_params = ControllerThetaParameters(
@@ -383,7 +389,14 @@ class DissipativeSimplestRINN(RecurrentNetwork, nn.Module):
         np_controller_params = controller_params.torch_to_np()
         P = to_numpy(self.P)
 
-        np_new_controller_params = self.theta_projector.project(np_controller_params, P)
+        np_new_controller_params = self.theta_projector.project(
+            np_controller_params,
+            P,
+            self.LDeltap,
+            self.MDeltapvv,
+            self.MDeltapvw,
+            self.MDeltapww,
+        )
         new_k = np_new_controller_params.np_to_torch(self.A_T.device)
 
         missing, unexpected = self.load_state_dict(
@@ -421,35 +434,50 @@ class DissipativeSimplestRINN(RecurrentNetwork, nn.Module):
             self.Lambda
         )
         # fmt: on
-        thetahat = theta.torch_construct_thetahat(self.P, self.plant_params, self.eps)
-
-        thetahat = thetahat.torch_to_np()
-        new_thetahat = self.thetahat_projector.project(
-            thetahat, self.LDeltap, self.MDeltapvv, self.MDeltapvw, self.MDeltapww
-        )
-
-        new_thetahat = new_thetahat.np_to_torch(device=self.A_T.device)
-        new_theta, P = new_thetahat.torch_construct_theta(self.plant_params, self.eps)
-
-        self.P = P
-        self.Lambda = new_thetahat.Lambda
 
         try:
-            theta.Lambda = self.Lambda
+            # First try thetahat dissipativity
+            thetahat = theta.torch_construct_thetahat(self.P, self.plant_params, self.eps)
+
+            thetahat = thetahat.torch_to_np()
+            new_thetahat = self.thetahat_projector.project(
+                thetahat, self.LDeltap, self.MDeltapvv, self.MDeltapvw, self.MDeltapww
+            )
+
+            new_thetahat = new_thetahat.np_to_torch(device=self.A_T.device)
+            _new_theta, P = new_thetahat.torch_construct_theta(self.plant_params, self.eps)
+
+            newP = P
+            newLambda = new_thetahat.Lambda
+
+            theta.Lambda = newLambda
             new_new_theta = self.theta_projector.project(
                 theta.torch_to_np(),
-                to_numpy(self.P),
+                to_numpy(newP),
                 self.LDeltap,
                 self.MDeltapvv,
                 self.MDeltapvw,
                 self.MDeltapww,
             )
             new_new_theta = new_new_theta.np_to_torch(device=self.A_T.device)
-            print("Using second projection result for thetahat -> theta.")
+
+            # Only modify self once everything has worked
+            self.P = newP
+            self.Lambda = newLambda
+
+            print("Used thetahat projection to make thetaprime safe.")
+            # print("Using second projection result for thetahat -> theta.")
         except Exception as _e:
-            print("Using first projection result for thetahat -> theta.")
-            new_new_theta = new_theta
-            raise _e  # terminating with this failure
+            # print("Using first projection result for thetahat -> theta.")
+            # new_new_theta = new_theta
+            # raise _e  # terminating with this failure
+
+            # Due to numerical issues, leave simple theta dissipativity using past P and Lambda as fallback
+            print(
+                "\nGoing back to theta projection using last P, Lambda, and MDeltap to make thetaprime safe.!\n"
+            )
+            self.enforce_dissipativity()
+            return
 
         new_k = new_new_theta
 

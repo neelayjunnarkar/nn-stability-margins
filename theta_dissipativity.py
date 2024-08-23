@@ -789,7 +789,7 @@ class LTIProjector:
         # Parameters
         plant_state_size = self.plant_params.Ap.shape[0]
         P_size = plant_state_size + self.state_size
-        self.pprojP = cp.Parameter((P_size, P_size), PSD=True)
+        self.pprojP = cp.Parameter((P_size, P_size))#, PSD=True)
         pprojAk = cp.Parameter((self.state_size, self.state_size))
         pprojBky = cp.Parameter((self.state_size, self.input_size))
         pprojCku = cp.Parameter((self.output_size, self.state_size))
@@ -802,12 +802,12 @@ class LTIProjector:
         self.pproj_LDeltap = cp.Parameter(self.LDeltap.shape)
         # TODO: is specifying symmetric creating numerical problems?
         self.pproj_MDeltapvv = cp.Parameter(
-            self.plant_params.MDeltapvv.shape, symmetric=True
+            self.plant_params.MDeltapvv.shape#, symmetric=True
         )
         self.pproj_MDeltapvw = cp.Parameter(self.plant_params.MDeltapvw.shape)
         self.pproj_MDeltapww = cp.Parameter(
             self.plant_params.MDeltapww.shape,
-            symmetric=True,
+            #symmetric=True,
         )
         plant_params = copy.copy(self.plant_params)
         plant_params.MDeltapvv = self.pproj_MDeltapvv
@@ -930,7 +930,7 @@ class LTIProjector:
         # Parameters
         plant_state_size = self.plant_params.Ap.shape[0]
         P_size = plant_state_size + self.state_size
-        self.pcheckP = cp.Parameter((P_size, P_size), PSD=True)
+        self.pcheckP = cp.Parameter((P_size, P_size)) #, PSD=True)
         pcheckAk = cp.Parameter((self.state_size, self.state_size))
         pcheckBky = cp.Parameter((self.state_size, self.input_size))
         pcheckCku = cp.Parameter((self.output_size, self.state_size))
@@ -1030,7 +1030,7 @@ class LTIProjector:
         # Parameters
         plant_state_size = self.plant_params.Ap.shape[0]
         P_size = plant_state_size + self.state_size
-        self.pcheck2P = cp.Parameter((P_size, P_size), PSD=True)
+        self.pcheck2P = cp.Parameter((P_size, P_size))#, PSD=True)
         pcheck2Ak = cp.Parameter((self.state_size, self.state_size))
         pcheck2Bky = cp.Parameter((self.state_size, self.input_size))
         pcheck2Cku = cp.Parameter((self.output_size, self.state_size))
@@ -1043,7 +1043,7 @@ class LTIProjector:
                 self.plant_params.MDeltapvv.shape[0],
                 self.plant_params.MDeltapvv.shape[1],
             ),
-            symmetric=True,
+           # symmetric=True,
         )
         self.pcheck2MDeltapvw = cp.Parameter(
             (self.plant_params.MDeltapvw.shape[0], self.plant_params.MDeltapvw.shape[1])
@@ -1053,7 +1053,7 @@ class LTIProjector:
                 self.plant_params.MDeltapww.shape[0],
                 self.plant_params.MDeltapww.shape[1],
             ),
-            symmetric=True,
+           # symmetric=True,
         )
 
         # Variables
@@ -1163,7 +1163,7 @@ class LTIProjector:
         ]
         if self.check2_problem.status not in feas_stats:
             print(f"Failed to solve with status {self.check2_problem.status}")
-            return False, None
+            return False, None, None, None, None
         # print(f"Projection objective: {self.check2_problem.value}")
 
         newP = self.vcheck2P.value

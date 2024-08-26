@@ -35,8 +35,8 @@ if use_savio:
     JOB_ID = os.getenv("SLURM_JOB_ID")
 else:
     # N_CPUS = 1 # test
-    N_CPUS = 2 # test
-    # N_CPUS = multiprocessing.cpu_count()
+    # N_CPUS = 2 # test
+    N_CPUS = multiprocessing.cpu_count()
 n_tasks = 1
 n_workers_per_task = int(math.floor(N_CPUS / n_tasks)) - 1 - 1
 
@@ -172,12 +172,12 @@ config = {
             "mode": "thetahat",
             "trs_mode": "fixed",
             "min_trs": 1,
-            "backoff_factor": 1.05,
+            "backoff_factor": 1.1,
             "lti_initializer": "dissipative_thetahat",
             "lti_initializer_kwargs": {
                 "trs_mode": "fixed",
                 "min_trs": 1,
-                "backoff_factor": 1.05,
+                "backoff_factor": 1.1,
             },
             "fix_mdeltap": False
         },
@@ -198,7 +198,7 @@ config = {
         #         "min_trs": 1,  # 1.5 # 1.44
         #         "backoff_factor": 1.05,
         #     },
-        #     "fix_mdeltap": True,
+        #     "fix_mdeltap": False,
         # },
     },
     ## Testing changes to training parameters

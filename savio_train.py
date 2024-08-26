@@ -36,6 +36,12 @@ SEED = int(os.getenv("SEED"))
 n_tasks = 1
 n_workers_per_task = int(math.floor(N_CPUS / n_tasks)) - 1 - 1
 
+## Cancel certain tasks
+
+if TASK_ID == 12 or TASK_ID == 13 or TASK_ID == 26 or TASK_ID == 27:
+    print("Cancelling this task.")
+    exit()
+
 # ## Env Config by Task
 # T = None
 # if TASK_ID == 0:
@@ -146,12 +152,12 @@ if TASK_ID in [0, 2, 4, 6, 8, 10, 14, 16, 18, 20, 22, 24]:
         "mode": "thetahat",
         "trs_mode": "fixed",
         "min_trs": 1,
-        "backoff_factor": 1.05,
+        "backoff_factor": 1.1, #1.05,
         "lti_initializer": "dissipative_thetahat",
         "lti_initializer_kwargs": {
             "trs_mode": "fixed",
             "min_trs": 1,
-            "backoff_factor": 1.05,
+            "backoff_factor": 1.1, #1.05,
         },
         "fix_mdeltap": mdeltap_fixed
     }
@@ -167,12 +173,12 @@ elif TASK_ID in [1, 3, 5, 7, 9, 11, 15, 17, 19, 21, 23, 25]:
         "state_size": 2,
         "trs_mode": "fixed",
         "min_trs": 1.0,
-        "backoff_factor": 1.05,
+        "backoff_factor": 1.1, #1.05,
         "lti_controller": "dissipative_thetahat",
         "lti_controller_kwargs": {
             "trs_mode": "fixed",
             "min_trs": 1.0,
-            "backoff_factor": 1.05,
+            "backoff_factor": 1.1, #1.05,
         },
         "fix_mdeltap": mdeltap_fixed
     }

@@ -246,31 +246,50 @@ class LTIModel(RecurrentNetwork, nn.Module):
         theta = ControllerLTIThetaParameters(
             self.A_T.t(), self.By_T.t(), self.Cu_T.t(), self.Duy_T.t()
         )
-        thetahat = theta.torch_construct_thetahat(self.P, self.plant_params)
-
-        thetahat = thetahat.torch_to_np()
-        new_thetahat = self.thethat_projector.project(
-            thetahat, self.LDeltap, self.MDeltapvv, self.MDeltapvw, self.MDeltapww
-        )
-        new_thetahat = new_thetahat.np_to_torch(device=self.A_T.device)
-
-        new_theta, P = new_thetahat.torch_construct_theta(self.plant_params)
-        self.P = P
 
         try:
+            thetahat = theta.torch_construct_thetahat(self.P, self.plant_params)
+
+            thetahat = thetahat.torch_to_np()
+            new_thetahat = self.thethat_projector.project(
+                thetahat, self.LDeltap, self.MDeltapvv, self.MDeltapvw, self.MDeltapww
+            )
+            new_thetahat = new_thetahat.np_to_torch(device=self.A_T.device)
+
+            new_theta, P = new_thetahat.torch_construct_theta(self.plant_params)
+            newP = P
+
             new_new_theta = self.theta_projector.project(
                 theta.torch_to_np(),
-                to_numpy(self.P),
+                to_numpy(newP),
                 self.LDeltap,
                 self.MDeltapvv,
                 self.MDeltapvw,
                 self.MDeltapww,
             )
             new_new_theta = new_new_theta.np_to_torch(device=self.A_T.device)
+
+            # Only modify self once everything has worked
+            self.P = newP
             print("Using second projection result for thetahat -> theta.")
         except Exception as _e:
-            print("Using first projection result for thetahat -> theta.")
-            new_new_theta = new_theta
+            # print("Using first projection result for thetahat -> theta.")
+            # new_new_theta = new_theta
+            # Due to numerical issues, leave simple theta dissipativity using past P and Lambda as fallback
+            print(
+                "\nGoing back to theta projection using last P, and MDeltap to make thetaprime safe.!\n"
+            )
+            np_theta = theta.torch_to_np()
+            P = to_numpy(self.P)
+            new_new_theta = self.theta_projector.project(
+                np_theta,
+                P,
+                self.LDeltap,
+                self.MDeltapvv,
+                self.MDeltapvw,
+                self.MDeltapww,
+            )
+            new_new_theta = new_new_theta.np_to_torch(device=self.A_T.device)
 
         new_k = new_new_theta
 

@@ -110,6 +110,7 @@ class LTIModel(RecurrentNetwork, nn.Module):
         assert "plant_config" in model_config
         plant = model_config["plant"](model_config["plant_config"])
         np_plant_params = plant.get_params()
+        self.np_plant_params = np_plant_params
         self.plant_params = np_plant_params.np_to_torch(device=self.log_stds.device)
 
         assert "lti_controller" in model_config
@@ -146,20 +147,24 @@ class LTIModel(RecurrentNetwork, nn.Module):
             self.Duy_T = nn.Parameter(self.Duy_T)
 
         if "P" in model_config:
-            self.P = from_numpy(model_config["P"])
+            self.P0 = model_config["P"]
+            # self.P = from_numpy(model_config["P"])
         elif "P" in info:
             print("Using P from LTI initialization.")
-            self.P = from_numpy(info["P"], device=self.A_T.device)
+            self.P0 = info["P"]
+            # self.P = from_numpy(info["P"], device=self.A_T.device)
         else:
-            self.P = torch.eye(
-                self.plant_params.Ap.shape[0] + self.state_size, device=self.A_T.device
+            self.P0 = np.eye(
+                self.plant_params.Ap.shape[0]
+                + self.state_size  # , device=self.A_T.device
             )
+        self.P = from_numpy(self.P0, device=self.A_T.device)
 
         # Initialize values for MDeltap
-        self.LDeltap = MDeltapvvToLDeltap(np_plant_params.MDeltapvv)
-        self.MDeltapvv = np_plant_params.MDeltapvv
-        self.MDeltapvw = np_plant_params.MDeltapvw
-        self.MDeltapww = np_plant_params.MDeltapww
+        self.LDeltap = MDeltapvvToLDeltap(np_plant_params.MDeltapvv).copy()
+        self.MDeltapvv = np_plant_params.MDeltapvv.copy()
+        self.MDeltapvw = np_plant_params.MDeltapvw.copy()
+        self.MDeltapww = np_plant_params.MDeltapww.copy()
         self.fix_mdeltap = (
             model_config["fix_mdeltap"] if "fix_mdeltap" in model_config else True
         )
@@ -226,7 +231,40 @@ class LTIModel(RecurrentNetwork, nn.Module):
                     self.plant_params.MDeltapvw = from_numpy(self.MDeltapvw)
                     self.plant_params.MDeltapww = from_numpy(self.MDeltapww)
             else:
-                self.enforce_dissipativity()
+                try:
+                    self.enforce_thetahat_dissipativity()
+                except Exception as e1:
+                    print(f"Failure: {e1}")
+                    try:
+                        # Fallback to more conservative but more numerically stable dissipativity condition
+                        print(
+                            "\nGoing back to theta projection using last P, and MDeltap to make thetaprime safe.!\n"
+                        )
+                        self.enforce_dissipativity()
+                    except Exception as e2:
+                        print(f"Failure 2: {e2}")
+                        try:
+                            # Reset P
+                            print("\nResetting P to make thetaprime safe!\n")
+                            self.P = from_numpy(self.P0, device=self.P.device)
+                            self.enforce_thetahat_dissipativity()
+                        except Exception as e3:
+                            print(f"Failure 3: {e3}")
+                            # Reset MDeltap
+                            self.P = torch.eye(self.P.shape[0], device=self.P.device) # from_numpy(self.P0, device=self.P.device)
+                            self.LDeltap = MDeltapvvToLDeltap(
+                                self.np_plant_params.MDeltapvv
+                            ).copy()
+                            self.MDeltapvv = self.np_plant_params.MDeltapvv.copy()
+                            self.MDeltapvw = self.np_plant_params.MDeltapvw.copy()
+                            self.MDeltapww = self.np_plant_params.MDeltapww.copy()
+                            print("\nResetting MDeltap to make thetaprime safe!\n")
+                            print(f"P: {self.P}")
+                            print(f"LDeltap: {self.LDeltap}")
+                            print(f"MDeltapvv: {self.MDeltapvv}")
+                            print(f"MDeltapvw: {self.MDeltapvw}")
+                            print(f"MDeltapww: {self.MDeltapww}")
+                            self.enforce_thetahat_dissipativity()
 
         # fmt: off
         theta = torch.vstack((
@@ -240,6 +278,42 @@ class LTIModel(RecurrentNetwork, nn.Module):
         self.oldtheta = theta.detach().clone()
 
     def enforce_dissipativity(self):
+        """Projects current theta parameters to ones that are certified by P and MDeltap."""
+        assert self.learn
+
+        theta = ControllerLTIThetaParameters(
+            self.A_T.t(), self.By_T.t(), self.Cu_T.t(), self.Duy_T.t()
+        )
+
+        np_theta = theta.torch_to_np()
+        P = to_numpy(self.P)
+        np_new_theta = self.theta_projector.project(
+            np_theta,
+            P,
+            self.LDeltap,
+            self.MDeltapvv,
+            self.MDeltapvw,
+            self.MDeltapww,
+        )
+        new_k = np_new_theta.np_to_torch(device=self.A_T.device)
+
+        missing, unexpected = self.load_state_dict(
+            {
+                "A_T": new_k.Ak.t(),
+                "By_T": new_k.Bky.t(),
+                "Cu_T": new_k.Cku.t(),
+                "Duy_T": new_k.Dkuy.t(),
+            },
+            strict=False,
+        )
+        assert (
+            unexpected == []
+        ), f"Loading unexpected key after projection: {unexpected}"
+        # fmt: off
+        assert missing ==  ['log_stds', 'value.0.weight', 'value.0.bias', 'value.2.weight', 'value.2.bias', 'value.4.weight', 'value.4.bias'], missing
+        # fmt: on
+
+    def enforce_thetahat_dissipativity(self):
         """Converts current theta, P, Lambda to thetahat and projects to dissipative set."""
         assert self.learn
 
@@ -247,49 +321,28 @@ class LTIModel(RecurrentNetwork, nn.Module):
             self.A_T.t(), self.By_T.t(), self.Cu_T.t(), self.Duy_T.t()
         )
 
-        try:
-            thetahat = theta.torch_construct_thetahat(self.P, self.plant_params)
+        thetahat = theta.torch_construct_thetahat(self.P, self.plant_params)
 
-            thetahat = thetahat.torch_to_np()
-            new_thetahat = self.thethat_projector.project(
-                thetahat, self.LDeltap, self.MDeltapvv, self.MDeltapvw, self.MDeltapww
-            )
-            new_thetahat = new_thetahat.np_to_torch(device=self.A_T.device)
+        thetahat = thetahat.torch_to_np()
+        new_thetahat = self.thethat_projector.project(
+            thetahat, self.LDeltap, self.MDeltapvv, self.MDeltapvw, self.MDeltapww
+        )
+        new_thetahat = new_thetahat.np_to_torch(device=self.A_T.device)
 
-            new_theta, P = new_thetahat.torch_construct_theta(self.plant_params)
-            newP = P
+        new_theta, newP = new_thetahat.torch_construct_theta(self.plant_params)
 
-            new_new_theta = self.theta_projector.project(
-                theta.torch_to_np(),
-                to_numpy(newP),
-                self.LDeltap,
-                self.MDeltapvv,
-                self.MDeltapvw,
-                self.MDeltapww,
-            )
-            new_new_theta = new_new_theta.np_to_torch(device=self.A_T.device)
+        new_new_theta = self.theta_projector.project(
+            theta.torch_to_np(),
+            to_numpy(newP),
+            self.LDeltap,
+            self.MDeltapvv,
+            self.MDeltapvw,
+            self.MDeltapww,
+        )
+        new_new_theta = new_new_theta.np_to_torch(device=self.A_T.device)
 
-            # Only modify self once everything has worked
-            self.P = newP
-            print("Using second projection result for thetahat -> theta.")
-        except Exception as _e:
-            # print("Using first projection result for thetahat -> theta.")
-            # new_new_theta = new_theta
-            # Due to numerical issues, leave simple theta dissipativity using past P and Lambda as fallback
-            print(
-                "\nGoing back to theta projection using last P, and MDeltap to make thetaprime safe.!\n"
-            )
-            np_theta = theta.torch_to_np()
-            P = to_numpy(self.P)
-            new_new_theta = self.theta_projector.project(
-                np_theta,
-                P,
-                self.LDeltap,
-                self.MDeltapvv,
-                self.MDeltapvw,
-                self.MDeltapww,
-            )
-            new_new_theta = new_new_theta.np_to_torch(device=self.A_T.device)
+        # Only modify self once everything has worked
+        self.P = newP
 
         new_k = new_new_theta
 

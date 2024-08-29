@@ -148,6 +148,7 @@ class DissipativeSimplestRINN(RecurrentNetwork, nn.Module):
         assert "plant_config" in model_config
         plant = model_config["plant"](model_config["plant_config"])
         np_plant_params = plant.get_params()
+        self.np_plant_params = np_plant_params
         self.plant_params = np_plant_params.np_to_torch(device=self.log_stds.device)
 
         # Define parameters
@@ -159,15 +160,18 @@ class DissipativeSimplestRINN(RecurrentNetwork, nn.Module):
 
         # Initial values for P
         if "P" in model_config:
-            self.P = from_numpy(model_config["P"])
+            self.P0 = model_config["P"] # from_numpy(model_config["P"])
+            self.P = from_numpy(self.P0, device=self.log_stds.device)
 
         # Initial values for Lambda
         if "Lambda" in model_config:
-            self.Lambda = from_numpy(
-                model_config["Lambda"], device=self.log_stds.device
-            )
+            self.Lambda0 = model_config["Lambda"]
+            # from_numpy(
+            #     model_config["Lambda"], device=self.log_stds.device
+            # )
         else:
-            self.Lambda = torch.eye(self.nonlin_size, device=self.log_stds.device)
+            self.Lambda0 = np.eye(self.nonlin_size) # torch.eye(self.nonlin_size, device=self.log_stds.device)
+        self.Lambda = from_numpy(self.Lambda0, device=self.log_stds.device)
 
         # Initialize values for MDeltap
         self.LDeltap = MDeltapvvToLDeltap(np_plant_params.MDeltapvv)
@@ -218,11 +222,11 @@ class DissipativeSimplestRINN(RecurrentNetwork, nn.Module):
 
             if "P" in info and "P" not in model_config:
                 print("Using P from LTI initialization.")
-                self.P = from_numpy(info["P"], device=self.A_T.device)
+                self.P0 = info["P"] # from_numpy(info["P"], device=self.A_T.device)
+                self.P = from_numpy(self.P0, device=self.A_T.device)
             # Might not want the following
-            self.Lambda = torch.zeros(
-                (self.nonlin_size, self.nonlin_size), device=self.A_T.device
-            )
+            self.Lambda0 = np.zeros((self.nonlin_size, self.nonlin_size))
+            self.Lambda = from_numpy(self.Lambda0, device=self.log_stds.device)
         else:
             self.A_T = nn.Parameter(uniform(self.state_size, self.state_size))
             self.Bw_T = nn.Parameter(uniform(self.nonlin_size, self.state_size))
@@ -237,7 +241,8 @@ class DissipativeSimplestRINN(RecurrentNetwork, nn.Module):
             self.Duy_T = nn.Parameter(uniform(self.input_size, self.output_size))
 
             if "P" not in model_config:
-                self.P = torch.eye(self.plant_params.Ap.shape[0] + self.state_size)
+                self.P0 = np.eye(self.plant_params.Ap.shape[0] + self.state_size) # torch.eye(self.plant_params.Ap.shape[0] + self.state_size)
+                self.P = from_numpy(self.P0, device=self.A_T.device)
 
         apply_norm(self, filter_out=["A_T", "Bw_T", "By_T", "Cu_T", "Duw_T", "Duy_T"])
 
@@ -350,7 +355,38 @@ class DissipativeSimplestRINN(RecurrentNetwork, nn.Module):
                         self.plant_params.MDeltapvw = from_numpy(self.MDeltapvw)
                         self.plant_params.MDeltapww = from_numpy(self.MDeltapww)
                 else:
-                    self.enforce_thetahat_dissipativity()
+                    try:
+                        self.enforce_thetahat_dissipativity()
+                    except Exception as e1:
+                        print(f"Failure: {e1}")
+                        try:
+                            # Fallback to more conservative but more numerically stable dissipativity condition
+                            print(
+                                "\nGoing back to theta projection using last P, Lambda, and MDeltap to make thetaprime safe!\n"
+                            )
+                            self.enforce_dissipativity()
+                        except Exception as e2:
+                            print(f"Failure 2: {e2}")
+                            try:
+                                # Reset P and Lambda
+                                print(
+                                    "\nResetting P and Lambda to make thetaprime safe!\n"
+                                )
+                                self.P = from_numpy(self.P0, device=self.P.device)
+                                self.Lambda = from_numpy(self.Lambda0, device=self.Lambda.device)
+                                self.enforce_thetahat_dissipativity()
+                            except Exception as e3:
+                                print(f"Failure 3: {e3}")
+                                # Reset MDeltap
+                                self.P = from_numpy(self.P0, device=self.P.device)
+                                self.Lambda = from_numpy(self.Lambda0, device=self.Lambda.device)
+                                self.LDeltap = MDeltapvvToLDeltap(self.np_plant_params.MDeltapvv)
+                                self.MDeltapvv = self.np_plant_params.MDeltapvv
+                                self.MDeltapvw = self.np_plant_params.MDeltapvw
+                                self.MDeltapww = self.np_plant_params.MDeltapww
+                                print("\nResetting MDeltap to make thetaprime safe!\n")
+                                self.enforce_thetahat_dissipativity()
+
             else:
                 raise ValueError(f"Mode {self.mode} is unknown.")
 
@@ -435,49 +471,36 @@ class DissipativeSimplestRINN(RecurrentNetwork, nn.Module):
         )
         # fmt: on
 
-        try:
-            # First try thetahat dissipativity
-            thetahat = theta.torch_construct_thetahat(self.P, self.plant_params, self.eps)
+        # First try thetahat dissipativity
+        thetahat = theta.torch_construct_thetahat(self.P, self.plant_params, self.eps)
 
-            thetahat = thetahat.torch_to_np()
-            new_thetahat = self.thetahat_projector.project(
-                thetahat, self.LDeltap, self.MDeltapvv, self.MDeltapvw, self.MDeltapww
-            )
+        thetahat = thetahat.torch_to_np()
+        new_thetahat = self.thetahat_projector.project(
+            thetahat, self.LDeltap, self.MDeltapvv, self.MDeltapvw, self.MDeltapww
+        )
 
-            new_thetahat = new_thetahat.np_to_torch(device=self.A_T.device)
-            _new_theta, P = new_thetahat.torch_construct_theta(self.plant_params, self.eps)
+        new_thetahat = new_thetahat.np_to_torch(device=self.A_T.device)
+        _new_theta, P = new_thetahat.torch_construct_theta(self.plant_params, self.eps)
 
-            newP = P
-            newLambda = new_thetahat.Lambda
+        newP = P
+        newLambda = new_thetahat.Lambda
 
-            theta.Lambda = newLambda
-            new_new_theta = self.theta_projector.project(
-                theta.torch_to_np(),
-                to_numpy(newP),
-                self.LDeltap,
-                self.MDeltapvv,
-                self.MDeltapvw,
-                self.MDeltapww,
-            )
-            new_new_theta = new_new_theta.np_to_torch(device=self.A_T.device)
+        theta.Lambda = newLambda
+        new_new_theta = self.theta_projector.project(
+            theta.torch_to_np(),
+            to_numpy(newP),
+            self.LDeltap,
+            self.MDeltapvv,
+            self.MDeltapvw,
+            self.MDeltapww,
+        )
+        new_new_theta = new_new_theta.np_to_torch(device=self.A_T.device)
 
-            # Only modify self once everything has worked
-            self.P = newP
-            self.Lambda = newLambda
+        # Only modify self once everything has worked
+        self.P = newP
+        self.Lambda = newLambda
 
-            print("Used thetahat projection to make thetaprime safe.")
-            # print("Using second projection result for thetahat -> theta.")
-        except Exception as _e:
-            # print("Using first projection result for thetahat -> theta.")
-            # new_new_theta = new_theta
-            # raise _e  # terminating with this failure
-
-            # Due to numerical issues, leave simple theta dissipativity using past P and Lambda as fallback
-            print(
-                "\nGoing back to theta projection using last P, Lambda, and MDeltap to make thetaprime safe.!\n"
-            )
-            self.enforce_dissipativity()
-            return
+        print("Used thetahat projection to make thetaprime safe.")
 
         new_k = new_new_theta
 

@@ -40,7 +40,7 @@ else:
 n_tasks = 1
 n_workers_per_task = int(math.floor(N_CPUS / n_tasks)) - 1 - 1
 
-seed = 0
+seed = 1
 
 
 # Same dt must be used in controller models
@@ -107,7 +107,7 @@ env_config = {
     "normed": True,
     "rollout_length": int(2 / dt) - 1,
     "disturbance_model": "occasional",
-    "disk_margin_type": "6dB36deg",
+    "disk_margin_type": "12dB60deg", # "6dB36deg",
     # "skew": 0,
     # "alpha": 0,
 }
@@ -150,16 +150,16 @@ config = {
         #         "backoff_factor": 1.1,
         #     }
         # }
-        "custom_model": RINN,
-        "custom_model_config": {
-            "state_size": 2,
-            "nonlin_size": 16,
-            "log_std_init": np.log(1.0),
-            "dt": dt,
-            "plant": env,
-            "plant_config": env_config,
-            "eps": 1e-3,
-        },
+        # "custom_model": RINN,
+        # "custom_model_config": {
+        #     "state_size": 2,
+        #     "nonlin_size": 16,
+        #     "log_std_init": np.log(1.0),
+        #     "dt": dt,
+        #     "plant": env,
+        #     "plant_config": env_config,
+        #     "eps": 1e-3,
+        # },
         # "custom_model": DissipativeSimplestRINN,
         # "custom_model_config": {
         #     "state_size": 2,
@@ -181,29 +181,29 @@ config = {
         #     },
         #     "fix_mdeltap": False
         # },
-        # "custom_model": LTIModel,
-        # "custom_model_config": {
-        #     "dt": dt,
-        #     "plant": env,
-        #     "plant_config": env_config,
-        #     "learn": True,
-        #     "log_std_init": np.log(1.0),
-        #     "state_size": 2,
-        #     "trs_mode": "fixed",
-        #     "min_trs": 1,  # 1.5, # 1.44,
-        #     "backoff_factor": 1.05,
-        #     "lti_controller": "dissipative_thetahat",
-        #     "lti_controller_kwargs": {
-        #         "trs_mode": "fixed",
-        #         "min_trs": 1,  # 1.5 # 1.44
-        #         "backoff_factor": 1.05,
-        #     },
-        #     "fix_mdeltap": False,
-        # },
+        "custom_model": LTIModel,
+        "custom_model_config": {
+            "dt": dt,
+            "plant": env,
+            "plant_config": env_config,
+            "learn": True,
+            "log_std_init": np.log(1.0),
+            "state_size": 2,
+            "trs_mode": "fixed",
+            "min_trs": 1,  # 1.5, # 1.44,
+            "backoff_factor": 1.1,
+            "lti_controller": "dissipative_thetahat",
+            "lti_controller_kwargs": {
+                "trs_mode": "fixed",
+                "min_trs": 1,  # 1.5 # 1.44
+                "backoff_factor": 1.1,
+            },
+            "fix_mdeltap": False,
+        },
     },
     ## Custom Trainer parameters
     # How often to do projection. n -> every n'th gradient step. E.g., 1 -> every gradient step.
-    "projection_period": 100,
+    "projection_period": 1,
     ## Testing changes to training parameters
     "sgd_minibatch_size": 2048,
     "train_batch_size": 20480,

@@ -1153,7 +1153,7 @@ class LTIProjector:
             # print(f"Projection solving took {t1-t0} seconds.")
         except Exception as e:
             print(f"Failed to solve: {e}")
-            return False, None
+            return False, None, None, None, None
 
         feas_stats = [
             cp.OPTIMAL,

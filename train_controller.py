@@ -201,7 +201,7 @@ config = {
             "fix_mdeltap": False,
         },
     },
-    ## Custom Trainer parameters
+    ## Custom Policy Parameters
     # How often to do projection. n -> every n'th gradient step. E.g., 1 -> every gradient step.
     "projection_period": 1,
     ## Testing changes to training parameters

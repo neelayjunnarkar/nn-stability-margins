@@ -212,6 +212,10 @@ assert trainer is not None
 
 # Configure the algorithm.
 config = {
+    # Custom Policy Parameters
+    # How often to do projection. n -> every n'th gradient step. E.g., 1 -> every gradient step.
+    "projection_period": 100,
+    # Rest
     "env": env,
     "env_config": env_config,
     "model": {

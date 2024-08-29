@@ -118,7 +118,7 @@ class FlexibleArmDiskMarginEnv(disk_margin_base.DiskMarginBaseEnv):
         # self.Xee = -np.eye(self.ne, dtype=np.float32)
 
     def compute_reward(self, x, u):
-        reward_state = np.exp(-(np.linalg.norm(self.state) ** 2))
+        reward_state = np.exp(-(np.linalg.norm(x) ** 2))
         reward_control = np.exp(-(np.linalg.norm(u) ** 2))
         reward = reward_state + reward_control
         return reward

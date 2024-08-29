@@ -150,17 +150,7 @@ config = {
         #         "backoff_factor": 1.1,
         #     }
         # }
-        # "custom_model": RINN,
-        # "custom_model_config": {
-        #     "state_size": 2,
-        #     "nonlin_size": 16,
-        #     "log_std_init": np.log(1.0),
-        #     "dt": dt,
-        #     "plant": env,
-        #     "plant_config": env_config,
-        #     "eps": 1e-3,
-        # },
-        "custom_model": DissipativeSimplestRINN,
+        "custom_model": RINN,
         "custom_model_config": {
             "state_size": 2,
             "nonlin_size": 16,
@@ -169,18 +159,28 @@ config = {
             "plant": env,
             "plant_config": env_config,
             "eps": 1e-3,
-            "mode": "thetahat",
-            "trs_mode": "fixed",
-            "min_trs": 1,
-            "backoff_factor": 1.1,
-            "lti_initializer": "dissipative_thetahat",
-            "lti_initializer_kwargs": {
-                "trs_mode": "fixed",
-                "min_trs": 1,
-                "backoff_factor": 1.1,
-            },
-            "fix_mdeltap": False
         },
+        # "custom_model": DissipativeSimplestRINN,
+        # "custom_model_config": {
+        #     "state_size": 2,
+        #     "nonlin_size": 16,
+        #     "log_std_init": np.log(1.0),
+        #     "dt": dt,
+        #     "plant": env,
+        #     "plant_config": env_config,
+        #     "eps": 1e-3,
+        #     "mode": "thetahat",
+        #     "trs_mode": "fixed",
+        #     "min_trs": 1,
+        #     "backoff_factor": 1.1,
+        #     "lti_initializer": "dissipative_thetahat",
+        #     "lti_initializer_kwargs": {
+        #         "trs_mode": "fixed",
+        #         "min_trs": 1,
+        #         "backoff_factor": 1.1,
+        #     },
+        #     "fix_mdeltap": False
+        # },
         # "custom_model": LTIModel,
         # "custom_model_config": {
         #     "dt": dt,
@@ -201,6 +201,9 @@ config = {
         #     "fix_mdeltap": False,
         # },
     },
+    ## Custom Trainer parameters
+    # How often to do projection. n -> every n'th gradient step. E.g., 1 -> every gradient step.
+    "projection_period": 100,
     ## Testing changes to training parameters
     "sgd_minibatch_size": 2048,
     "train_batch_size": 20480,

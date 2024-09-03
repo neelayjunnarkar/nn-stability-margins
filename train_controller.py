@@ -203,7 +203,7 @@ config = {
     },
     ## Custom Policy Parameters
     # How often to do projection. n -> every n'th gradient step. E.g., 1 -> every gradient step.
-    "projection_period": 1,
+    "projection_period": 100,
     ## Testing changes to training parameters
     "sgd_minibatch_size": 2048,
     "train_batch_size": 20480,

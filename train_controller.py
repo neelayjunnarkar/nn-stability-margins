@@ -122,34 +122,6 @@ config = {
         #     "n_layers": 2,
         #     "size": 19
         # }
-        # "custom_model": ImplicitModel,
-        # "custom_model_config": {"state_size": 16},
-        # "custom_model": RINN,
-        # "custom_model_config": {
-        #     "state_size": 2,
-        #     "nonlin_size": 16,
-        #     "dt": dt,
-        #     "log_std_init": np.log(1.0)
-        # }
-        # "custom_model": DissipativeRINN,
-        # "custom_model_config": {
-        #     "state_size": 4,
-        #     "nonlin_size": 16,
-        #     "log_std_init": np.log(1.0),
-        #     "dt": dt,
-        #     "plant": env,
-        #     "plant_config": env_config,
-        #     "eps": 1e-3,
-        #     "trs_mode": "fixed",
-        #     "min_trs": 1.0,
-        #     "backoff_factor": 1.1,
-        #     "lti_initializer": "dissipative_thetahat",
-        #     "lti_initializer_kwargs": {
-        #         "trs_mode": "fixed",
-        #         "min_trs": 1.0,
-        #         "backoff_factor": 1.1,
-        #     }
-        # }
         # "custom_model": RINN,
         # "custom_model_config": {
         #     "state_size": 2,

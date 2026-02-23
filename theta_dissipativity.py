@@ -413,12 +413,12 @@ class Projector:
         self.pproj_MDeltapvv.value = MDeltapvv
         self.pproj_MDeltapvw.value = MDeltapvw
         self.pproj_MDeltapww.value = MDeltapww
-        print("\n\n")
-        print(f"Theta project LDeltap: {LDeltap}")
-        print(f"Theta project MDeltapvv: {MDeltapvv}")
-        print(f"Theta project MDeltapvw: {MDeltapvw}")
-        print(f"Theta project MDeltapww: {MDeltapww}")
-        print("\n\n")
+        # print("\n\n")
+        # print(f"Theta project LDeltap: {LDeltap}")
+        # print(f"Theta project MDeltapvv: {MDeltapvv}")
+        # print(f"Theta project MDeltapvw: {MDeltapvw}")
+        # print(f"Theta project MDeltapww: {MDeltapww}")
+        # print("\n\n")
 
         try:
             # t0 = time.perf_counter()
@@ -490,7 +490,7 @@ class Projector:
         )
         mat = construct_dissipativity_matrix(
             A, Bw, Bd, Cv, Dvw, Dvd, Ce, Dew, Ded, self.vcheckP,
-            LDelta, Mvw, Mww, 
+            LDelta, Mvw, Mww,
             self.plant_params.Xdd, self.plant_params.Xde, self.LX,
             "cvxpy"
         )
@@ -728,22 +728,29 @@ class Projector:
         if isinstance(self.vcheck2MDeltapvv, np.ndarray):
             newMDeltapvv = self.vcheck2MDeltapvv
         else:
-            newMDeltapvv = self.vcheck2MDeltapvv.value.toarray()
+            if isinstance(self.vcheck2MDeltapvv.value, np.ndarray):
+                newMDeltapvv = self.vcheck2MDeltapvv.value
+            else:
+                newMDeltapvv = self.vcheck2MDeltapvv.value.toarray()
         if isinstance(self.vcheck2MDeltapvw, np.ndarray):
             newMDeltapvw = self.vcheck2MDeltapvw
+        elif isinstance(self.vcheck2MDeltapvw.value, np.ndarray):
+            newMDeltapvw = self.vcheck2MDeltapvw.value
         else:
             newMDeltapvw = self.vcheck2MDeltapvw.value.toarray()
         if isinstance(self.vcheck2MDeltapww, np.ndarray):
             newMDeltapww = self.vcheck2MDeltapww
+        elif isinstance(self.vcheck2MDeltapww.value, np.ndarray):
+            newMDeltapww = self.vcheck2MDeltapww.value
         else:
             newMDeltapww = self.vcheck2MDeltapww.value.toarray()
 
         # print(f"newP: {newP}")
         # print(f"newLambda: {newLambda}")
-        print("Found new MDeltap:")
-        print(f"newMDeltapvv: {newMDeltapvv}")
-        print(f"newMDeltapvw: {newMDeltapvw}")
-        print(f"newMDeltapww: {newMDeltapww}")
+        # print("Found new MDeltap:")
+        # print(f"newMDeltapvv: {newMDeltapvv}")
+        # print(f"newMDeltapvw: {newMDeltapvw}")
+        # print(f"newMDeltapww: {newMDeltapww}")
         return True, newP, newLambda, newMDeltapvv, newMDeltapvw, newMDeltapww
 
 
@@ -761,6 +768,11 @@ class LTIProjector:
         input_size,
         # A function takes in epsilon and returns (MDeltapvv, MDeltapvw, MDeltapww, [variables] [constraints])
         plant_uncertainty_constraints=None,
+        # If either is None, minimizes sum square error between original and new param
+        # If both are floats, then minimize weighted combination of respective norms of *just* new params
+        min_params_norm2=None,
+        min_params_norminf=None,
+        sphere_P=False, # If None, in dissipativity checks, minimizes -eps s.t. mat << -eps, if True, then min t-s s.t. tI >= P_new >= s I
     ):
         self.plant_params = plant_params
         self.eps = eps
@@ -768,6 +780,9 @@ class LTIProjector:
         self.state_size = state_size
         self.input_size = input_size
         self.nonlin_size = 1  # placeholder nonlin size used for creating zeros
+        self.min_params_norm2 = min_params_norm2
+        self.min_params_norminf = min_params_norminf
+        self.sphere_P = sphere_P
 
         assert is_positive_semidefinite(plant_params.MDeltapvv)
         Dm, Vm = np.linalg.eigh(plant_params.MDeltapvv)
@@ -783,6 +798,7 @@ class LTIProjector:
         self._construct_check_dissipativity_problem()
         if self.plant_uncertainty_constraints is not None:
             self._construct_check_dissipativity_problem2()
+
 
     def _construct_projection_problem(self):
         # Define projection problem: Projecting theta into BMI parameterized by P and Lambda.
@@ -857,14 +873,24 @@ class LTIProjector:
             cp.sum_squares(pprojCku - vprojCku),
             cp.sum_squares(pprojDkuy - vprojDkuy),
         ])
-        cost_size = sum([
-            cp.sum_squares(vprojAk),
-            cp.sum_squares(vprojBky),
-            cp.sum_squares(vprojCku),
-            cp.sum_squares(vprojDkuy),
+        vparams = cp.bmat([
+            [vprojAk, vprojBky],
+            [vprojCku, vprojDkuy]
         ])
+        # cost_size = sum([
+        #     cp.sum_squares(vprojAk),
+        #     cp.sum_squares(vprojBky),
+        #     cp.sum_squares(vprojCku),
+        #     cp.sum_squares(vprojDkuy),
+        # ])
         # fmt: on
-        objective = cost_projection_error
+        if self.min_params_norm2 is None or self.min_params_norminf is None:
+            objective = cost_projection_error
+        else:
+            objective = (
+                self.min_params_norm2 * cp.norm2(vparams.flatten())
+                + self.min_params_norminf * cp.norm_inf(vparams.flatten())
+            )
 
         self.proj_problem = cp.Problem(cp.Minimize(objective), constraints)
 
@@ -889,12 +915,12 @@ class LTIProjector:
         self.pproj_MDeltapvv.value = MDeltapvv
         self.pproj_MDeltapvw.value = MDeltapvw
         self.pproj_MDeltapww.value = MDeltapww
-        print("\n\n")
-        print(f"Theta project LDeltap: {LDeltap}")
-        print(f"Theta project MDeltapvv: {MDeltapvv}")
-        print(f"Theta project MDeltapvw: {MDeltapvw}")
-        print(f"Theta project MDeltapww: {MDeltapww}")
-        print("\n\n")
+        # print("\n\n")
+        # print(f"Theta project LDeltap: {LDeltap}")
+        # print(f"Theta project MDeltapvv: {MDeltapvv}")
+        # print(f"Theta project MDeltapvw: {MDeltapvw}")
+        # print(f"Theta project MDeltapww: {MDeltapww}")
+        # print("\n\n")
 
         try:
             # t0 = time.perf_counter()
@@ -967,7 +993,7 @@ class LTIProjector:
         )
         mat = construct_dissipativity_matrix(
             A, Bw, Bd, Cv, Dvw, Dvd, Ce, Dew, Ded, self.vcheckP,
-            LDelta, Mvw, Mww, 
+            LDelta, Mvw, Mww,
             self.plant_params.Xdd, self.plant_params.Xde, self.LX,
             "cvxpy"
         )
@@ -1111,18 +1137,21 @@ class LTIProjector:
 
         # cost_projection_error = cp.sum_squares(self.vcheck2P - self.pcheck2P)
         # cost_size = cp.sum_squares(self.vcheck2P)
-        objective = -self.vcheck2Eps
-        objective += cp.sum(
-            [
-                cp.sum_squares(v - p)
-                for (v, p) in [
-                    (self.vcheck2P, self.pcheck2P),
-                    (self.vcheck2MDeltapvv, self.pcheck2MDeltapvv),
-                    (self.vcheck2MDeltapvw, self.pcheck2MDeltapvw),
-                    (self.vcheck2MDeltapww, self.pcheck2MDeltapww),
+        if self.sphere_P:
+            objective = -self.vcheck2Eps + cp.lambda_max(self.vcheck2P) - cp.lambda_min(self.vcheck2P)
+        else:
+            objective = -self.vcheck2Eps
+            objective += cp.sum(
+                [
+                    cp.sum_squares(v - p)
+                    for (v, p) in [
+                        (self.vcheck2P, self.pcheck2P),
+                        (self.vcheck2MDeltapvv, self.pcheck2MDeltapvv),
+                        (self.vcheck2MDeltapvw, self.pcheck2MDeltapvw),
+                        (self.vcheck2MDeltapww, self.pcheck2MDeltapww),
+                    ]
                 ]
-            ]
-        )
+            )
 
         self.check2_problem = cp.Problem(cp.Minimize(objective), constraints)
 
@@ -1170,19 +1199,26 @@ class LTIProjector:
         if isinstance(self.vcheck2MDeltapvv, np.ndarray):
             newMDeltapvv = self.vcheck2MDeltapvv
         else:
-            newMDeltapvv = self.vcheck2MDeltapvv.value.toarray()
+            if isinstance(self.vcheck2MDeltapvv.value, np.ndarray):
+                newMDeltapvv = self.vcheck2MDeltapvv.value
+            else:
+                newMDeltapvv = self.vcheck2MDeltapvv.value.toarray()
         if isinstance(self.vcheck2MDeltapvw, np.ndarray):
             newMDeltapvw = self.vcheck2MDeltapvw
+        elif isinstance(self.vcheck2MDeltapvw.value, np.ndarray):
+            newMDeltapvw = self.vcheck2MDeltapvw.value
         else:
             newMDeltapvw = self.vcheck2MDeltapvw.value.toarray()
         if isinstance(self.vcheck2MDeltapww, np.ndarray):
             newMDeltapww = self.vcheck2MDeltapww
+        elif isinstance(self.vcheck2MDeltapww.value, np.ndarray):
+            newMDeltapww = self.vcheck2MDeltapww.value
         else:
             newMDeltapww = self.vcheck2MDeltapww.value.toarray()
 
-        print("Found new MDeltap:")
-        print(f"newMDeltapvv: {newMDeltapvv}")
-        print(f"newMDeltapvw: {newMDeltapvw}")
-        print(f"newMDeltapww: {newMDeltapww}")
+        # print("Found new MDeltap:")
+        # print(f"newMDeltapvv: {newMDeltapvv}")
+        # print(f"newMDeltapvw: {newMDeltapvw}")
+        # print(f"newMDeltapww: {newMDeltapww}")
 
         return True, newP, newMDeltapvv, newMDeltapvw, newMDeltapww

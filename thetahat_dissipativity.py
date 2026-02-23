@@ -842,7 +842,7 @@ class LTIProjector:
         ]
         if self.proj_problem.status not in feas_stats:
             print(f"Failed to solve with status {self.proj_problem.status}")
-            raise Exception()
+            raise Exception(f"Failed to solve with status {self.proj_problem.status}")
         # print(f"Projection objective: {self.proj_problem.value}")
 
         new_controller_params = ControllerLTIThetahatParameters(

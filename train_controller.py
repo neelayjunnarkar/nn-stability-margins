@@ -44,6 +44,15 @@ seed = 1
 
 
 # Same dt must be used in controller models
+dt = 0.01
+env = InvertedPendulumEnv
+env_config = {
+    "observation": "full",
+    "normed": True,
+    "dt": dt,
+    "supply_rate": "l2_gain",
+    "disturbance_model": "none"
+}
 # dt = 0.01
 # env = InvertedPendulumEnv
 # env_config = {
@@ -99,18 +108,18 @@ seed = 1
 #     "dt": dt,
 #     "seed": seed,
 # }
-dt = 0.001
-env = FlexibleArmDiskMarginEnv
-env_config = {
-    "dt": dt,
-    "seed": seed,
-    "normed": True,
-    "rollout_length": int(2 / dt) - 1,
-    "disturbance_model": "occasional",
-    "disk_margin_type": "12dB60deg", # "6dB36deg",
-    # "skew": 0,
-    # "alpha": 0,
-}
+# dt = 0.001
+# env = FlexibleArmDiskMarginEnv
+# env_config = {
+#     "dt": dt,
+#     "seed": seed,
+#     "normed": True,
+#     "rollout_length": int(2 / dt) - 1,
+#     "disturbance_model": "occasional",
+#     "disk_margin_type": "12dB60deg", # "6dB36deg",
+#     # "skew": 0,
+#     # "alpha": 0,
+# }
 
 # Configure the algorithm.
 config = {
@@ -179,7 +188,7 @@ config = {
     ## Testing changes to training parameters
     "sgd_minibatch_size": 2048,
     "train_batch_size": 20480,
-    "lr": 1e-4,
+    "lr": 1e-2,
     "num_envs_per_worker": 10,
     ## End test
     "seed": seed,

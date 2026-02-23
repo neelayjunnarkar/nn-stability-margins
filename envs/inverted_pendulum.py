@@ -3,6 +3,7 @@ import numpy as np
 from gym import spaces
 from gym.utils import seeding
 from variable_structs import PlantParameters
+import cvxpy as cp
 
 
 class InvertedPendulumEnv(gym.Env):
@@ -102,24 +103,37 @@ class InvertedPendulumEnv(gym.Env):
             print(
                 "Plant using L2 gain construction for disturbance, performance output, and supply rate."
             )
-            # Supply rate for L2 gain of 0.99 from disturbance to output being the state
+            # Supply rate for L2 gain of 0.99 from disturbance being input to output being (q x1, r u)
             self.nd = self.nu
-            self.ne = self.nx
+            # self.ne = self.nx
+            self.ne = 2
 
             self.Bpd = self.Bpu.copy()
             self.Dpvd = np.zeros((self.nv, self.nd), dtype=np.float32)
             self.Dpyd = np.zeros((self.ny, self.nd), dtype=np.float32)
 
             self.Cpe = np.eye(self.nx, dtype=np.float32)
+            # perf_q = 1/np.pi
+            # perf_r = 1.0 * 1.0 / (0.333 * (0.15 * 9.81 * 0.5))
+            # self.Cpe = np.array([[perf_q, 0], [0.0, 0]], dtype=np.float32)
             self.Dpew = np.zeros((self.ne, self.nw), dtype=np.float32)
             self.Dped = np.zeros((self.ne, self.nd), dtype=np.float32)
             self.Dpeu = np.zeros((self.ne, self.nu), dtype=np.float32)
+            # self.Dpeu = np.array([[0.0], [perf_r]])
 
-            gamma = 0.99
+            gamma = 10
+            # gamma = 0.99
             alpha = 0.7
-            self.Xdd = alpha * gamma**2 * np.eye(self.nd, dtype=np.float32)
+            #
+            self.Xdd = alpha * np.eye(self.nd, dtype=np.float32)
             self.Xde = np.zeros((self.nd, self.ne), dtype=np.float32)
-            self.Xee = -alpha * np.eye(self.ne, dtype=np.float32)
+            self.Xee = -alpha * (1.0 / gamma**2) * np.eye(self.ne, dtype=np.float32)
+
+            # gamma = 10.0
+            # alpha = 1
+            # self.Xdd = alpha * np.eye(self.nd, dtype=np.float32)
+            # self.Xde = np.zeros((self.nd, self.ne), dtype=np.float32)
+            # self.Xee = -alpha * (1 / gamma**2) * np.eye(self.ne, dtype=np.float32)
         else:
             raise ValueError(
                 f"Supply rate {env_config['supply_rate']} must be one of: 'stability'."
@@ -158,6 +172,17 @@ class InvertedPendulumEnv(gym.Env):
         self.MDeltapvv = np.array([[-2 * self.C_Delta * self.D_Delta]], dtype=np.float32)
         self.MDeltapvw = np.array([[self.C_Delta + self.D_Delta]], dtype=np.float32)
         self.MDeltapww = np.array([[-2]], dtype=np.float32)
+
+        def plant_uncertainty_constraints(eps):
+            assert self.nv == 1
+            Lambda = cp.Variable((self.nv, self.nv), diag=True)
+            MDeltapvv = Lambda @ self.MDeltapvv
+            MDeltapvw = Lambda @ self.MDeltapvw
+            MDeltapww = Lambda @ self.MDeltapww
+            variables = [Lambda]
+            constraints = [Lambda >> 0]
+            return (MDeltapvv, MDeltapvw, MDeltapww, variables, constraints)
+        self.plant_uncertainty_constraints = plant_uncertainty_constraints
 
         self.max_reward = 1  # 2.1
 

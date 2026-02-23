@@ -129,7 +129,9 @@ class LTIModel(RecurrentNetwork, nn.Module):
         lti_controller_kwargs["input_size"] = self.input_size
         lti_controller_kwargs["output_size"] = self.output_size
         lti_controller, info = lti_controllers.controller_map[lti_controller](
-            np_plant_params, **lti_controller_kwargs
+            np_plant_params,
+            plant_uncertainty_constraints=plant.plant_uncertainty_constraints,
+            **lti_controller_kwargs
         )
         lti_controller = lti_controller.np_to_torch(device=self.log_stds.device)
 
@@ -160,11 +162,27 @@ class LTIModel(RecurrentNetwork, nn.Module):
             )
         self.P = from_numpy(self.P0, device=self.A_T.device)
 
+        print("A, By, Cu, Duy")
+        print(self.A_T.t())
+        print(self.By_T.t())
+        print(self.Cu_T.t())
+        print(self.Duy_T.t())
+        print("P")
+        print(self.P)
+        exit()
+
         # Initialize values for MDeltap
-        self.LDeltap = MDeltapvvToLDeltap(np_plant_params.MDeltapvv).copy()
-        self.MDeltapvv = np_plant_params.MDeltapvv.copy()
-        self.MDeltapvw = np_plant_params.MDeltapvw.copy()
-        self.MDeltapww = np_plant_params.MDeltapww.copy()
+        if "MDeltapvv" in info:
+            print("Using MDeltapvv, etc., from LTI initialization.")
+            self.LDeltap = info["LDeltap"]
+            self.MDeltapvv = info["MDeltapvv"]
+            self.MDeltapvw = info["MDeltapvw"]
+            self.MDeltapww = info["MDeltapww"]
+        else:
+            self.LDeltap = MDeltapvvToLDeltap(np_plant_params.MDeltapvv).copy()
+            self.MDeltapvv = np_plant_params.MDeltapvv.copy()
+            self.MDeltapvw = np_plant_params.MDeltapvw.copy()
+            self.MDeltapww = np_plant_params.MDeltapww.copy()
         self.fix_mdeltap = (
             model_config["fix_mdeltap"] if "fix_mdeltap" in model_config else True
         )
@@ -272,6 +290,14 @@ class LTIModel(RecurrentNetwork, nn.Module):
             torch.hstack((self.Cu_T.t(), self.Duy_T.t()))
         ))
         # fmt: on
+        print("A, By, Cu, Duy")
+        print(self.A_T.t())
+        print(self.By_T.t())
+        print(self.Cu_T.t())
+        print(self.Duy_T.t())
+        print("P")
+        print(self.P)
+        # exit()
         print_norms(theta, "theta")
         if self.oldtheta is not None:
             print_norms(theta - self.oldtheta, "theta - oldtheta")

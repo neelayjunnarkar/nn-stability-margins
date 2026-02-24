@@ -2,6 +2,8 @@ import torch
 import torch.nn as nn
 import math
 import numpy as np
+from ray.rllib.agents.callbacks import DefaultCallbacks
+import os
 
 _str_to_activation = {
     'relu': nn.ReLU(),
@@ -67,3 +69,23 @@ def from_numpy(array, device=None):
 
 def to_numpy(tensor):
     return tensor.to('cpu').detach().numpy()
+
+class ExportWeightsCallback(DefaultCallbacks):
+    def on_train_result(self, *, trainer, result, **kwargs):
+        trial_dir = trainer.logdir
+        export_path = os.path.join(trial_dir, "latest_model_state_dict.pth")
+
+        policy = trainer.get_policy("default_policy")
+        model = policy.model
+
+        additional = {
+            "P": model.P,
+            "Lambda": model.Lambda,
+            "MDeltapvv": model.MDeltapvv,
+            "MDeltapvw": model.MDeltapvw,
+            "MDeltapww": model.MDeltapww,
+        }
+        data = model.state_dict() | additional
+        torch.save(data, export_path)
+
+        print(f"\n--- Standalone weights saved to: {export_path} ---")

@@ -26,6 +26,7 @@ from models import (
     LTIModel,
 )
 from trainers import ProjectedPPOTrainer
+from utils import ExportWeightsCallback
 
 
 use_savio = False
@@ -185,7 +186,7 @@ config = {
     },
     ## Custom Policy Parameters
     # How often to do projection. n -> every n'th gradient step. E.g., 1 -> every gradient step.
-    "projection_period": 100,
+    "projection_period": 1,
     ## Testing changes to training parameters
     "sgd_minibatch_size": 2048,
     "train_batch_size": 20480,
@@ -200,6 +201,7 @@ config = {
     "evaluation_config": {"render_env": False, "explore": False},
     "evaluation_interval": 1,
     "evaluation_parallel_to_training": True,
+    "callbacks": ExportWeightsCallback
 }
 
 print("==================================")
@@ -239,5 +241,5 @@ results = tune.run(
     name="scratch",
     local_dir="ray_results",
     checkpoint_at_end=True,
-    checkpoint_freq=1000,
+    checkpoint_freq=1,
 )

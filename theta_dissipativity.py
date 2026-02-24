@@ -253,6 +253,7 @@ class Projector:
         input_size,
         # A function takes in epsilon and returns (MDeltapvv, MDeltapvw, MDeltapww, [variables] [constraints])
         plant_uncertainty_constraints=None,
+        Dkvw_structure="full", # "full" or "strict_upper_triang"
     ):
         self.plant_params = plant_params
         self.eps = eps
@@ -260,6 +261,7 @@ class Projector:
         self.output_size = output_size
         self.state_size = state_size
         self.input_size = input_size
+        self.Dkvw_structure = Dkvw_structure
 
         assert is_positive_semidefinite(plant_params.MDeltapvv)
         Dm, Vm = np.linalg.eigh(plant_params.MDeltapvv)
@@ -317,23 +319,34 @@ class Projector:
         plant_params.MDeltapww = self.pproj_MDeltapww
 
         # Variables
+        match self.Dkvw_structure:
+            case "full":
+                self.vprojDkvw = cp.Variable((self.nonlin_size, self.nonlin_size))
+            case "strict_upper_triang":
+                self.vprojDkvw_vec = cp.Variable((int((self.nonlin_size - 1)*self.nonlin_size/2),))
+                self.vprojDkvw = cp.vec_to_upper_tri(self.vprojDkvw_vec, strict=True)
+
+                assert self.vprojDkvw.shape[0] == self.nonlin_size, f"{self.vprojDkvw.shape}, {int((self.nonlin_size - 1)*self.nonlin_size/2)}, {self.nonlin_size}"
+                assert self.vprojDkvw.shape[1] == self.nonlin_size
+            case _:
+                raise ValueError(f"Invalid Dkvw_structure: {self.Dkvw_structure}")
         vprojAk = cp.Variable((self.state_size, self.state_size))
         vprojBkw = cp.Variable((self.state_size, self.nonlin_size))
         vprojBky = cp.Variable((self.state_size, self.input_size))
         vprojCkv = cp.Variable((self.nonlin_size, self.state_size))
-        vprojDkvw = cp.Variable((self.nonlin_size, self.nonlin_size))
+        # vprojDkvw = cp.Variable((self.nonlin_size, self.nonlin_size))
         vprojDkvy = cp.Variable((self.nonlin_size, self.input_size))
         vprojCku = cp.Variable((self.output_size, self.state_size))
         vprojDkuw = cp.Variable((self.output_size, self.nonlin_size))
         vprojDkuy = cp.Variable((self.output_size, self.input_size))
         # fmt: off
         self.vproj_k = ControllerThetaParameters(
-            vprojAk, vprojBkw, vprojBky, vprojCkv, vprojDkvw, vprojDkvy,
+            vprojAk, vprojBkw, vprojBky, vprojCkv, self.vprojDkvw, vprojDkvy,
             vprojCku, vprojDkuw, vprojDkuy, None,
         )
 
         controller_params = ControllerThetaParameters(
-            vprojAk, vprojBkw, vprojBky, vprojCkv, vprojDkvw, vprojDkvy,
+            vprojAk, vprojBkw, vprojBky, vprojCkv, self.vprojDkvw, vprojDkvy,
             vprojCku, vprojDkuw, vprojDkuy, self.pproj_k.Lambda
         )
         A, Bw, Bd, Cv, Dvw, Dvd, Ce, Dew, Ded, LDelta, Mvv, Mvw, Mww = construct_closed_loop(
@@ -352,7 +365,7 @@ class Projector:
             # Ordinarily only need Lambda PSD, but for the following well-posedness condition need it PD
             self.pproj_k.Lambda >> self.eps * np.eye(self.pproj_k.Lambda.shape[0]),
             # Well-posedness condition Lambda Dkvw + Dkvw^T Lambda - 2 Lambda < 0
-            pprojLambda @ vprojDkvw + vprojDkvw.T @ pprojLambda - 2 * pprojLambda
+            pprojLambda @ self.vprojDkvw + self.vprojDkvw.T @ pprojLambda - 2 * pprojLambda
             << -self.eps * np.eye(pprojLambda.shape[0]),
             # Dissipativity condition
             mat << 0,
@@ -364,23 +377,23 @@ class Projector:
             cp.sum_squares(pprojBkw - vprojBkw),
             cp.sum_squares(pprojBky - vprojBky),
             cp.sum_squares(pprojCkv - vprojCkv),
-            cp.sum_squares(pprojDkvw - vprojDkvw),
+            cp.sum_squares(pprojDkvw - self.vprojDkvw),
             cp.sum_squares(pprojDkvy - vprojDkvy),
             cp.sum_squares(pprojCku - vprojCku),
             cp.sum_squares(pprojDkuw - vprojDkuw),
             cp.sum_squares(pprojDkuy - vprojDkuy),
         ])
-        cost_size = sum([
-            cp.sum_squares(vprojAk),
-            cp.sum_squares(vprojBkw),
-            cp.sum_squares(vprojBky),
-            cp.sum_squares(vprojCkv),
-            cp.sum_squares(vprojDkvw),
-            cp.sum_squares(vprojDkvy),
-            cp.sum_squares(vprojCku),
-            cp.sum_squares(vprojDkuw),
-            cp.sum_squares(vprojDkuy),
-        ])
+        # cost_size = sum([
+        #     cp.sum_squares(vprojAk),
+        #     cp.sum_squares(vprojBkw),
+        #     cp.sum_squares(vprojBky),
+        #     cp.sum_squares(vprojCkv),
+        #     cp.sum_squares(self.vprojDkvw),
+        #     cp.sum_squares(vprojDkvy),
+        #     cp.sum_squares(vprojCku),
+        #     cp.sum_squares(vprojDkuw),
+        #     cp.sum_squares(vprojDkuy),
+        # ])
         # fmt: on
         objective = cost_projection_error
 
@@ -449,6 +462,9 @@ class Projector:
         )
         # fmt: on
 
+        assert np.all(np.tril(self.vproj_k.Dkvw.value, 0) == 0), f"Matrix is not strictly upper triangular: {self.vproj_k.Dkvw.value}, {self.Dkvw_structure}"
+
+
         return new_controller_params
 
     def _construct_check_dissipativity_problem(self):
@@ -510,14 +526,14 @@ class Projector:
         ]
 
         # fmt: off
-        cost_projection_error = sum([
-            cp.sum_squares(self.vcheckP - self.pcheckP),
-            cp.sum_squares(self.vcheckLambda - self.pcheck_k.Lambda),
-        ])
-        cost_size = sum([
-            cp.sum_squares(self.vcheckP),
-            cp.sum_squares(self.vcheckLambda),
-        ])
+        # cost_projection_error = sum([
+        #     cp.sum_squares(self.vcheckP - self.pcheckP),
+        #     cp.sum_squares(self.vcheckLambda - self.pcheck_k.Lambda),
+        # ])
+        # cost_size = sum([
+        #     cp.sum_squares(self.vcheckP),
+        #     cp.sum_squares(self.vcheckLambda),
+        # ])
         # fmt: on
         objective = -self.vcheckEps
 

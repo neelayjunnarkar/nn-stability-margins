@@ -184,6 +184,7 @@ class Projector:
         trs_mode,  # Either "fixed" or "variable"
         min_trs,  # Used as the trs value when trs_mode="fixed"
         backoff_factor=1.1,  # Multiplier for bound on suboptimality
+        Dkvw_structure="full" # "full" or "strict_upper_triang"
     ):
         self.plant_params = plant_params
         self.eps = eps
@@ -195,6 +196,7 @@ class Projector:
         self.min_trs = min_trs
         assert self.trs_mode == "fixed", "trs_mode variable deprecated"
         self.backoff_factor = backoff_factor
+        self.Dkvw_structure = Dkvw_structure
 
         assert is_positive_semidefinite(plant_params.MDeltapvv)
         Dm, Vm = np.linalg.eigh(plant_params.MDeltapvv)
@@ -235,6 +237,17 @@ class Projector:
         plant_params.MDeltapww = self.proj_pMDeltapww
 
         # Variables: This will be the solution of the projection.
+        match self.Dkvw_structure:
+            case "full":
+                self.proj_vDkvwhat = cp.Variable((self.nonlin_size, self.nonlin_size))
+            case "strict_upper_triang":
+                self.proj_vDkvwhat_vec = cp.Variable((int((self.nonlin_size - 1)*self.nonlin_size/2),))
+                self.proj_vDkvwhat = cp.vec_to_upper_tri(self.proj_vDkvwhat_vec, strict=True)
+
+                assert self.proj_vDkvwhat.shape[0] == self.nonlin_size, f"{self.proj_vDkvwhat.shape}, {int((self.nonlin_size - 1)*self.nonlin_size/2)}, {self.nonlin_size}"
+                assert self.proj_vDkvwhat.shape[1] == self.nonlin_size
+            case _:
+                raise ValueError(f"Invalid Dkvw_structure: {self.Dkvw_structure}")
         self.proj_vThetahat = ControllerThetahatParameters(
             S=cp.Variable((self.state_size, self.state_size), PSD=True),
             R=cp.Variable((self.state_size, self.state_size), PSD=True),
@@ -246,7 +259,8 @@ class Projector:
             NC=cp.Variable((self.nonlin_size, self.state_size)),
             Dkuw=cp.Variable((self.output_size, self.nonlin_size)),
             Dkvyhat=cp.Variable((self.nonlin_size, self.input_size)),
-            Dkvwhat=cp.Variable((self.nonlin_size, self.nonlin_size)),
+            Dkvwhat=self.proj_vDkvwhat,
+            # Dkvwhat=cp.Variable((self.nonlin_size, self.nonlin_size)),
             Lambda=cp.Variable((self.nonlin_size, self.nonlin_size), diag=True),
         )
 
@@ -351,6 +365,14 @@ class Projector:
         self.backoff_optimal_projection_error = cp.Parameter(nonneg=True)
 
         # Variables: This will be the solution of the projection.
+        match self.Dkvw_structure:
+            case "full":
+                self.backoff_vDkvwhat = cp.Variable((self.nonlin_size, self.nonlin_size))
+            case "strict_upper_triang":
+                self.backoff_vDkvwhat_vec = cp.Variable((int((self.nonlin_size - 1)*self.nonlin_size/2),))
+                self.backoff_vDkvwhat = cp.vec_to_upper_tri(self.backoff_vDkvwhat_vec, strict=True)
+            case _:
+                raise ValueError(f"Invalid Dkvw_structure: {self.Dkvw_structure}")
         self.backoff_vThetahat = ControllerThetahatParameters(
             S=cp.Variable((self.state_size, self.state_size), PSD=True),
             R=cp.Variable((self.state_size, self.state_size), PSD=True),
@@ -362,7 +384,8 @@ class Projector:
             NC=cp.Variable((self.nonlin_size, self.state_size)),
             Dkuw=cp.Variable((self.output_size, self.nonlin_size)),
             Dkvyhat=cp.Variable((self.nonlin_size, self.input_size)),
-            Dkvwhat=cp.Variable((self.nonlin_size, self.nonlin_size)),
+            Dkvwhat=self.backoff_vDkvwhat,
+            # Dkvwhat=cp.Variable((self.nonlin_size, self.nonlin_size)),
             Lambda=cp.Variable((self.nonlin_size, self.nonlin_size), diag=True),
         )
         self.backoff_veps = cp.Variable(pos=True)
@@ -436,9 +459,9 @@ class Projector:
         self.proj_pMDeltapvw.value = MDeltapvw
         self.proj_pMDeltapww.value = MDeltapww
 
-        print("\n\n")
-        print(f"Thetahat project MDeltapvv: {MDeltapvv}")
-        print("\n\n")
+        # print("\n\n")
+        # print(f"Thetahat project MDeltapvv: {MDeltapvv}")
+        # print("\n\n")
 
         try:
             # t0 = time.perf_counter()
@@ -523,6 +546,8 @@ class Projector:
             self.backoff_vThetahat.Dkvyhat.value, self.backoff_vThetahat.Dkvwhat.value, self.backoff_vThetahat.Lambda.value.toarray()
         )
         # fmt: on
+
+        assert np.all(np.tril(self.backoff_vThetahat.Dkvwhat.value, 0) == 0), f"Matrix is not strictly upper triangular: {self.backoff_vThetahat.Dkvwhat.value}, {self.Dkvw_structure}"
 
         # Testing
         print(f"Backoff eps value: {self.backoff_veps.value}")

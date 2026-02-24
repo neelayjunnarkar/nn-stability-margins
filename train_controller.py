@@ -141,46 +141,47 @@ config = {
         #     "plant_config": env_config,
         #     "eps": 1e-3,
         # },
-        # "custom_model": DissipativeSimplestRINN,
-        # "custom_model_config": {
-        #     "state_size": 2,
-        #     "nonlin_size": 16,
-        #     "log_std_init": np.log(1.0),
-        #     "dt": dt,
-        #     "plant": env,
-        #     "plant_config": env_config,
-        #     "eps": 1e-3,
-        #     "mode": "thetahat",
-        #     "trs_mode": "fixed",
-        #     "min_trs": 1,
-        #     "backoff_factor": 1.1,
-        #     "lti_initializer": "dissipative_thetahat",
-        #     "lti_initializer_kwargs": {
-        #         "trs_mode": "fixed",
-        #         "min_trs": 1,
-        #         "backoff_factor": 1.1,
-        #     },
-        #     "fix_mdeltap": False
-        # },
-        "custom_model": LTIModel,
+        "custom_model": DissipativeSimplestRINN,
         "custom_model_config": {
+            "state_size": 2,
+            "nonlin_size": 2,
+            "log_std_init": np.log(1.0),
             "dt": dt,
             "plant": env,
             "plant_config": env_config,
-            "learn": True,
-            "log_std_init": np.log(1.0),
-            "state_size": 2,
+            "eps": 1e-3,
+            "mode": "thetahat",
             "trs_mode": "fixed",
-            "min_trs": 1,  # 1.5, # 1.44,
+            "min_trs": 1,
             "backoff_factor": 1.1,
-            "lti_controller": "dissipative_thetahat",
-            "lti_controller_kwargs": {
+            "lti_initializer": "dissipative_thetahat",
+            "lti_initializer_kwargs": {
                 "trs_mode": "fixed",
-                "min_trs": 1,  # 1.5 # 1.44
+                "min_trs": 1,
                 "backoff_factor": 1.1,
             },
             "fix_mdeltap": False,
+            "Dkvw_structure": "strict_upper_triang", # "full" or "strict_upper_triang"
         },
+        # "custom_model": LTIModel,
+        # "custom_model_config": {
+        #     "dt": dt,
+        #     "plant": env,
+        #     "plant_config": env_config,
+        #     "learn": True,
+        #     "log_std_init": np.log(1.0),
+        #     "state_size": 2,
+        #     "trs_mode": "fixed",
+        #     "min_trs": 1,  # 1.5, # 1.44,
+        #     "backoff_factor": 1.1,
+        #     "lti_controller": "dissipative_thetahat",
+        #     "lti_controller_kwargs": {
+        #         "trs_mode": "fixed",
+        #         "min_trs": 1,  # 1.5 # 1.44
+        #         "backoff_factor": 1.1,
+        #     },
+        #     "fix_mdeltap": False,
+        # },
     },
     ## Custom Policy Parameters
     # How often to do projection. n -> every n'th gradient step. E.g., 1 -> every gradient step.
@@ -188,7 +189,7 @@ config = {
     ## Testing changes to training parameters
     "sgd_minibatch_size": 2048,
     "train_batch_size": 20480,
-    "lr": 1e-2,
+    "lr": 1e-4,
     "num_envs_per_worker": 10,
     ## End test
     "seed": seed,

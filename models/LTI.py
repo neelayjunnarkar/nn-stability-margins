@@ -169,7 +169,6 @@ class LTIModel(RecurrentNetwork, nn.Module):
         print(self.Duy_T.t())
         print("P")
         print(self.P)
-        exit()
 
         # Initialize values for MDeltap
         if "MDeltapvv" in info:

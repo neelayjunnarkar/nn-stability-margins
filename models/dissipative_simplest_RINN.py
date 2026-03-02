@@ -231,6 +231,8 @@ class DissipativeSimplestRINN(RecurrentNetwork, nn.Module):
                 print("Using P from LTI initialization.")
                 self.P0 = info["P"] # from_numpy(info["P"], device=self.A_T.device)
                 self.P = from_numpy(self.P0, device=self.A_T.device)
+                print("Condition Number: ", torch.linalg.cond(self.P))
+                print("\n\n")
             # Might not want the following
             self.Lambda0 = np.zeros((self.nonlin_size, self.nonlin_size))
             self.Lambda = from_numpy(self.Lambda0, device=self.log_stds.device)
@@ -415,8 +417,8 @@ class DissipativeSimplestRINN(RecurrentNetwork, nn.Module):
         print_norms(self.Cu_T.t(), "Cku  ")
         print_norms(self.Duw_T.t(), "Dkuw ")
         print_norms(self.Duy_T.t(), "Dkuy ")
+        print("Condition Number: ", torch.linalg.cond(self.P))
         print_norms(theta, "theta")
-        print(self.Dvw_T.t())
         # exit()
         if self.oldtheta is not None:
             print_norms(theta - self.oldtheta, "theta - oldtheta")

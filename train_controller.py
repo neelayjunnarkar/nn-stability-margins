@@ -145,7 +145,7 @@ config = {
         "custom_model": DissipativeSimplestRINN,
         "custom_model_config": {
             "state_size": 2,
-            "nonlin_size": 2,
+            "nonlin_size": 8,
             "log_std_init": np.log(1.0),
             "dt": dt,
             "plant": env,

@@ -674,21 +674,24 @@ class Projector:
             mat << -self.vcheck2Eps,
             self.vcheck2Eps >= 0,
         ] + MDeltap_constraints
-        objective = -self.vcheck2Eps
 
-        # TODO: this is a test to regulate size of MDeltap
-        objective += cp.sum(
-            [
-                cp.sum_squares(v - p)
-                for (v, p) in [
-                    (self.vcheck2P, self.pcheck2P),
-                    (self.vcheck2Lambda, self.pcheck2Lambda),
-                    (self.vcheck2MDeltapvv, self.pcheck2MDeltapvv),
-                    (self.vcheck2MDeltapvw, self.pcheck2MDeltapvw),
-                    (self.vcheck2MDeltapww, self.pcheck2MDeltapww),
-                ]
-            ]
-        )
+
+        # objective = -self.vcheck2Eps
+        # # TODO: this is a test to regulate size of MDeltap
+        # objective += cp.sum(
+        #     [
+        #         cp.sum_squares(v - p)
+        #         for (v, p) in [
+        #             # (self.vcheck2P, self.pcheck2P),
+        #             (self.vcheck2Lambda, self.pcheck2Lambda),
+        #             (self.vcheck2MDeltapvv, self.pcheck2MDeltapvv),
+        #             (self.vcheck2MDeltapvw, self.pcheck2MDeltapvw),
+        #             (self.vcheck2MDeltapww, self.pcheck2MDeltapww),
+        #         ]
+        #     ]
+        # )
+
+        objective = cp.lambda_max(self.vcheck2P) - cp.lambda_min(self.vcheck2P)
 
         self.check2_problem = cp.Problem(cp.Minimize(objective), constraints)
 

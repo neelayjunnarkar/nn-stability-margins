@@ -1,6 +1,7 @@
 # Dissipative code using the condition that is a BMI in controller parameters and storage function.
-import time
 import copy
+import time
+from typing import Literal
 
 import cvxpy as cp
 import numpy as np
@@ -253,7 +254,7 @@ class Projector:
         input_size,
         # A function takes in epsilon and returns (MDeltapvv, MDeltapvw, MDeltapww, [variables] [constraints])
         plant_uncertainty_constraints=None,
-        Dkvw_structure="full", # "full" or "strict_upper_triang"
+        Dkvw_structure: Literal["full", "strict_upper_triang"] = "full",
     ):
         self.plant_params = plant_params
         self.eps = eps
@@ -323,10 +324,14 @@ class Projector:
             case "full":
                 self.vprojDkvw = cp.Variable((self.nonlin_size, self.nonlin_size))
             case "strict_upper_triang":
-                self.vprojDkvw_vec = cp.Variable((int((self.nonlin_size - 1)*self.nonlin_size/2),))
+                self.vprojDkvw_vec = cp.Variable(
+                    (int((self.nonlin_size - 1) * self.nonlin_size / 2),)
+                )
                 self.vprojDkvw = cp.vec_to_upper_tri(self.vprojDkvw_vec, strict=True)
 
-                assert self.vprojDkvw.shape[0] == self.nonlin_size, f"{self.vprojDkvw.shape}, {int((self.nonlin_size - 1)*self.nonlin_size/2)}, {self.nonlin_size}"
+                assert self.vprojDkvw.shape[0] == self.nonlin_size, (
+                    f"{self.vprojDkvw.shape}, {int((self.nonlin_size - 1) * self.nonlin_size / 2)}, {self.nonlin_size}"
+                )
                 assert self.vprojDkvw.shape[1] == self.nonlin_size
             case _:
                 raise ValueError(f"Invalid Dkvw_structure: {self.Dkvw_structure}")
@@ -365,7 +370,9 @@ class Projector:
             # Ordinarily only need Lambda PSD, but for the following well-posedness condition need it PD
             self.pproj_k.Lambda >> self.eps * np.eye(self.pproj_k.Lambda.shape[0]),
             # Well-posedness condition Lambda Dkvw + Dkvw^T Lambda - 2 Lambda < 0
-            pprojLambda @ self.vprojDkvw + self.vprojDkvw.T @ pprojLambda - 2 * pprojLambda
+            pprojLambda @ self.vprojDkvw
+            + self.vprojDkvw.T @ pprojLambda
+            - 2 * pprojLambda
             << -self.eps * np.eye(pprojLambda.shape[0]),
             # Dissipativity condition
             mat << 0,
@@ -462,8 +469,10 @@ class Projector:
         )
         # fmt: on
 
-        assert np.all(np.tril(self.vproj_k.Dkvw.value, 0) == 0), f"Matrix is not strictly upper triangular: {self.vproj_k.Dkvw.value}, {self.Dkvw_structure}"
-
+        if self.Dkvw_structure == "strict_upper_triang":
+            assert np.all(np.tril(self.vproj_k.Dkvw.value, 0) == 0), (
+                f"Matrix is not strictly upper triangular: {self.vproj_k.Dkvw.value}, {self.Dkvw_structure}"
+            )
 
         return new_controller_params
 
@@ -675,7 +684,6 @@ class Projector:
             self.vcheck2Eps >= 0,
         ] + MDeltap_constraints
 
-
         # objective = -self.vcheck2Eps
         # # TODO: this is a test to regulate size of MDeltap
         # objective += cp.sum(
@@ -791,7 +799,7 @@ class LTIProjector:
         # If both are floats, then minimize weighted combination of respective norms of *just* new params
         min_params_norm2=None,
         min_params_norminf=None,
-        sphere_P=False, # If None, in dissipativity checks, minimizes -eps s.t. mat << -eps, if True, then min t-s s.t. tI >= P_new >= s I
+        sphere_P=False,  # If None, in dissipativity checks, minimizes -eps s.t. mat << -eps, if True, then min t-s s.t. tI >= P_new >= s I
     ):
         self.plant_params = plant_params
         self.eps = eps
@@ -818,13 +826,12 @@ class LTIProjector:
         if self.plant_uncertainty_constraints is not None:
             self._construct_check_dissipativity_problem2()
 
-
     def _construct_projection_problem(self):
         # Define projection problem: Projecting theta into BMI parameterized by P and Lambda.
         # Parameters
         plant_state_size = self.plant_params.Ap.shape[0]
         P_size = plant_state_size + self.state_size
-        self.pprojP = cp.Parameter((P_size, P_size))#, PSD=True)
+        self.pprojP = cp.Parameter((P_size, P_size))  # , PSD=True)
         pprojAk = cp.Parameter((self.state_size, self.state_size))
         pprojBky = cp.Parameter((self.state_size, self.input_size))
         pprojCku = cp.Parameter((self.output_size, self.state_size))
@@ -837,12 +844,12 @@ class LTIProjector:
         self.pproj_LDeltap = cp.Parameter(self.LDeltap.shape)
         # TODO: is specifying symmetric creating numerical problems?
         self.pproj_MDeltapvv = cp.Parameter(
-            self.plant_params.MDeltapvv.shape#, symmetric=True
+            self.plant_params.MDeltapvv.shape  # , symmetric=True
         )
         self.pproj_MDeltapvw = cp.Parameter(self.plant_params.MDeltapvw.shape)
         self.pproj_MDeltapww = cp.Parameter(
             self.plant_params.MDeltapww.shape,
-            #symmetric=True,
+            # symmetric=True,
         )
         plant_params = copy.copy(self.plant_params)
         plant_params.MDeltapvv = self.pproj_MDeltapvv
@@ -906,10 +913,9 @@ class LTIProjector:
         if self.min_params_norm2 is None or self.min_params_norminf is None:
             objective = cost_projection_error
         else:
-            objective = (
-                self.min_params_norm2 * cp.norm2(vparams.flatten())
-                + self.min_params_norminf * cp.norm_inf(vparams.flatten())
-            )
+            objective = self.min_params_norm2 * cp.norm2(
+                vparams.flatten()
+            ) + self.min_params_norminf * cp.norm_inf(vparams.flatten())
 
         self.proj_problem = cp.Problem(cp.Minimize(objective), constraints)
 
@@ -975,7 +981,7 @@ class LTIProjector:
         # Parameters
         plant_state_size = self.plant_params.Ap.shape[0]
         P_size = plant_state_size + self.state_size
-        self.pcheckP = cp.Parameter((P_size, P_size)) #, PSD=True)
+        self.pcheckP = cp.Parameter((P_size, P_size))  # , PSD=True)
         pcheckAk = cp.Parameter((self.state_size, self.state_size))
         pcheckBky = cp.Parameter((self.state_size, self.input_size))
         pcheckCku = cp.Parameter((self.output_size, self.state_size))
@@ -1075,7 +1081,7 @@ class LTIProjector:
         # Parameters
         plant_state_size = self.plant_params.Ap.shape[0]
         P_size = plant_state_size + self.state_size
-        self.pcheck2P = cp.Parameter((P_size, P_size))#, PSD=True)
+        self.pcheck2P = cp.Parameter((P_size, P_size))  # , PSD=True)
         pcheck2Ak = cp.Parameter((self.state_size, self.state_size))
         pcheck2Bky = cp.Parameter((self.state_size, self.input_size))
         pcheck2Cku = cp.Parameter((self.output_size, self.state_size))
@@ -1088,7 +1094,7 @@ class LTIProjector:
                 self.plant_params.MDeltapvv.shape[0],
                 self.plant_params.MDeltapvv.shape[1],
             ),
-           # symmetric=True,
+            # symmetric=True,
         )
         self.pcheck2MDeltapvw = cp.Parameter(
             (self.plant_params.MDeltapvw.shape[0], self.plant_params.MDeltapvw.shape[1])
@@ -1098,7 +1104,7 @@ class LTIProjector:
                 self.plant_params.MDeltapww.shape[0],
                 self.plant_params.MDeltapww.shape[1],
             ),
-           # symmetric=True,
+            # symmetric=True,
         )
 
         # Variables
@@ -1157,7 +1163,11 @@ class LTIProjector:
         # cost_projection_error = cp.sum_squares(self.vcheck2P - self.pcheck2P)
         # cost_size = cp.sum_squares(self.vcheck2P)
         if self.sphere_P:
-            objective = -self.vcheck2Eps + cp.lambda_max(self.vcheck2P) - cp.lambda_min(self.vcheck2P)
+            objective = (
+                -self.vcheck2Eps
+                + cp.lambda_max(self.vcheck2P)
+                - cp.lambda_min(self.vcheck2P)
+            )
         else:
             objective = -self.vcheck2Eps
             objective += cp.sum(

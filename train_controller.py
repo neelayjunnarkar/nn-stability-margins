@@ -3,6 +3,7 @@ Main file for configuring and training controllers.
 """
 
 import math
+import multiprocessing
 import os
 
 import numpy as np
@@ -23,8 +24,8 @@ if use_savio:
     JOB_ID = os.getenv("SLURM_JOB_ID")
 else:
     # N_CPUS = 1 # test
-    N_CPUS = 2  # test
-    # N_CPUS = multiprocessing.cpu_count()
+    # N_CPUS = 2  # test
+    N_CPUS = multiprocessing.cpu_count()
 n_tasks = 1
 n_workers_per_task = int(math.floor(N_CPUS / n_tasks)) - 1 - 1
 
@@ -149,7 +150,7 @@ config = {
                 "backoff_factor": 1.1,
             },
             "fix_mdeltap": False,
-            "Dkvw_structure": "strict_upper_triang",  # "full" or "strict_upper_triang"
+            "Dkvw_structure": "full",  # "full" or "strict_upper_triang"
         },
         # "custom_model": LTIModel,
         # "custom_model_config": {
@@ -173,7 +174,7 @@ config = {
     },
     ## Custom Policy Parameters
     # How often to do projection. n -> every n'th gradient step. E.g., 1 -> every gradient step.
-    "projection_period": 1,
+    "projection_period": 100,
     ## Testing changes to training parameters
     "sgd_minibatch_size": 2048,
     "train_batch_size": 20480,

@@ -431,6 +431,7 @@ class DissipativeSimplestRINN(RecurrentNetwork, nn.Module):
         # print_norms(self.Duy_T.t(), "Dkuy ")
         # print_norms(theta, "theta")
         if self.oldtheta is not None:
+            print_norms(theta, "theta")
             print_norms(theta - self.oldtheta, "theta - oldtheta")
         self.oldtheta = theta.detach().clone()
 

@@ -108,6 +108,8 @@ def dissipative_thetahat(
     trs_mode="fixed",
     min_trs=1.0,
     backoff_factor=1.1,
+    plant_uncertainty_constraints=None,
+    num_iters=3,
     **kwargs,
 ):
     """Synthesize dissipative LTI controller using convex condition."""
@@ -135,14 +137,58 @@ def dissipative_thetahat(
         NA21=np.zeros((output_size, state_size)),
         NA22=np.zeros((output_size, input_size)),
     )
-    LDeltap = MDeltapvvToLDeltap(plant_params.MDeltapvv)
-    MDeltapvv = plant_params.MDeltapvv
-    MDeltapvw = plant_params.MDeltapvw
-    MDeltapww = plant_params.MDeltapww
-    thetahat = projector.project(thetahat0, LDeltap, MDeltapvv, MDeltapvw, MDeltapww)
-    controller, P = construct_theta(thetahat, plant_params)
+    LDeltap0 = MDeltapvvToLDeltap(plant_params.MDeltapvv)
+    MDeltapvv0 = plant_params.MDeltapvv
+    MDeltapvw0 = plant_params.MDeltapvw
+    MDeltapww0 = plant_params.MDeltapww
+    thetahat = projector.project(thetahat0, LDeltap0, MDeltapvv0, MDeltapvw0, MDeltapww0)
+    controller0, P0 = construct_theta(thetahat, plant_params)
 
-    return controller, {"P": P, "thetahat": thetahat}
+    second_projector = ThetaLTIProjector(
+        plant_params, eps, output_size, state_size, input_size,
+        plant_uncertainty_constraints=plant_uncertainty_constraints,
+        min_params_norm2=1.0, min_params_norminf=1.0, sphere_P=True
+    )
+
+    LDeltaps = [LDeltap0]
+    MDeltapvvs = [MDeltapvv0]
+    MDeltapvws = [MDeltapvw0]
+    MDeltapwws = [MDeltapww0]
+    controllers = [controller0]
+    Ps = [P0]
+
+    for _ in range(num_iters):
+        controller = second_projector.project(
+            controllers[-1], Ps[-1], LDeltaps[-1], MDeltapvvs[-1], MDeltapvws[-1], MDeltapwws[-1]
+        )
+        is_dissipative, P, MDeltapvv, MDeltapvw, MDeltapww = second_projector.is_dissipative2(
+            controller, Ps[-1], MDeltapvvs[-1], MDeltapvws[-1], MDeltapwws[-1]
+        )
+        assert is_dissipative
+        LDeltap = MDeltapvvToLDeltap(MDeltapvv)
+
+        LDeltaps.append(LDeltap)
+        MDeltapvvs.append(MDeltapvv)
+        MDeltapvws.append(MDeltapvw)
+        MDeltapwws.append(MDeltapww)
+        controllers.append(controller)
+        Ps.append(P)
+
+        # print(controller)
+        # print(np.linalg.cond(P))
+
+    print("End LTI Controller Iterations.")
+
+    # TODO: what about thetahat, which isn't updated?
+    info = {
+        "P": Ps[-1],
+        "LDeltap": LDeltaps[-1],
+        "MDeltapvv": MDeltapvvs[-1],
+        "MDeltapvw": MDeltapvws[-1],
+        "MDeltapww": MDeltapwws[-1],
+        "thetahat": thetahat
+    }
+    return controllers[-1], info
 
 
 def dissipative_theta(

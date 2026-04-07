@@ -253,6 +253,7 @@ class Projector:
         input_size,
         # A function takes in epsilon and returns (MDeltapvv, MDeltapvw, MDeltapww, [variables] [constraints])
         plant_uncertainty_constraints=None,
+        Dkvw_structure="full", # "full" or "strict_upper_triang"
     ):
         self.plant_params = plant_params
         self.eps = eps
@@ -260,6 +261,7 @@ class Projector:
         self.output_size = output_size
         self.state_size = state_size
         self.input_size = input_size
+        self.Dkvw_structure = Dkvw_structure
 
         assert is_positive_semidefinite(plant_params.MDeltapvv)
         Dm, Vm = np.linalg.eigh(plant_params.MDeltapvv)
@@ -317,23 +319,34 @@ class Projector:
         plant_params.MDeltapww = self.pproj_MDeltapww
 
         # Variables
+        match self.Dkvw_structure:
+            case "full":
+                self.vprojDkvw = cp.Variable((self.nonlin_size, self.nonlin_size))
+            case "strict_upper_triang":
+                self.vprojDkvw_vec = cp.Variable((int((self.nonlin_size - 1)*self.nonlin_size/2),))
+                self.vprojDkvw = cp.vec_to_upper_tri(self.vprojDkvw_vec, strict=True)
+
+                assert self.vprojDkvw.shape[0] == self.nonlin_size, f"{self.vprojDkvw.shape}, {int((self.nonlin_size - 1)*self.nonlin_size/2)}, {self.nonlin_size}"
+                assert self.vprojDkvw.shape[1] == self.nonlin_size
+            case _:
+                raise ValueError(f"Invalid Dkvw_structure: {self.Dkvw_structure}")
         vprojAk = cp.Variable((self.state_size, self.state_size))
         vprojBkw = cp.Variable((self.state_size, self.nonlin_size))
         vprojBky = cp.Variable((self.state_size, self.input_size))
         vprojCkv = cp.Variable((self.nonlin_size, self.state_size))
-        vprojDkvw = cp.Variable((self.nonlin_size, self.nonlin_size))
+        # vprojDkvw = cp.Variable((self.nonlin_size, self.nonlin_size))
         vprojDkvy = cp.Variable((self.nonlin_size, self.input_size))
         vprojCku = cp.Variable((self.output_size, self.state_size))
         vprojDkuw = cp.Variable((self.output_size, self.nonlin_size))
         vprojDkuy = cp.Variable((self.output_size, self.input_size))
         # fmt: off
         self.vproj_k = ControllerThetaParameters(
-            vprojAk, vprojBkw, vprojBky, vprojCkv, vprojDkvw, vprojDkvy,
+            vprojAk, vprojBkw, vprojBky, vprojCkv, self.vprojDkvw, vprojDkvy,
             vprojCku, vprojDkuw, vprojDkuy, None,
         )
 
         controller_params = ControllerThetaParameters(
-            vprojAk, vprojBkw, vprojBky, vprojCkv, vprojDkvw, vprojDkvy,
+            vprojAk, vprojBkw, vprojBky, vprojCkv, self.vprojDkvw, vprojDkvy,
             vprojCku, vprojDkuw, vprojDkuy, self.pproj_k.Lambda
         )
         A, Bw, Bd, Cv, Dvw, Dvd, Ce, Dew, Ded, LDelta, Mvv, Mvw, Mww = construct_closed_loop(
@@ -352,7 +365,7 @@ class Projector:
             # Ordinarily only need Lambda PSD, but for the following well-posedness condition need it PD
             self.pproj_k.Lambda >> self.eps * np.eye(self.pproj_k.Lambda.shape[0]),
             # Well-posedness condition Lambda Dkvw + Dkvw^T Lambda - 2 Lambda < 0
-            pprojLambda @ vprojDkvw + vprojDkvw.T @ pprojLambda - 2 * pprojLambda
+            pprojLambda @ self.vprojDkvw + self.vprojDkvw.T @ pprojLambda - 2 * pprojLambda
             << -self.eps * np.eye(pprojLambda.shape[0]),
             # Dissipativity condition
             mat << 0,
@@ -364,23 +377,23 @@ class Projector:
             cp.sum_squares(pprojBkw - vprojBkw),
             cp.sum_squares(pprojBky - vprojBky),
             cp.sum_squares(pprojCkv - vprojCkv),
-            cp.sum_squares(pprojDkvw - vprojDkvw),
+            cp.sum_squares(pprojDkvw - self.vprojDkvw),
             cp.sum_squares(pprojDkvy - vprojDkvy),
             cp.sum_squares(pprojCku - vprojCku),
             cp.sum_squares(pprojDkuw - vprojDkuw),
             cp.sum_squares(pprojDkuy - vprojDkuy),
         ])
-        cost_size = sum([
-            cp.sum_squares(vprojAk),
-            cp.sum_squares(vprojBkw),
-            cp.sum_squares(vprojBky),
-            cp.sum_squares(vprojCkv),
-            cp.sum_squares(vprojDkvw),
-            cp.sum_squares(vprojDkvy),
-            cp.sum_squares(vprojCku),
-            cp.sum_squares(vprojDkuw),
-            cp.sum_squares(vprojDkuy),
-        ])
+        # cost_size = sum([
+        #     cp.sum_squares(vprojAk),
+        #     cp.sum_squares(vprojBkw),
+        #     cp.sum_squares(vprojBky),
+        #     cp.sum_squares(vprojCkv),
+        #     cp.sum_squares(self.vprojDkvw),
+        #     cp.sum_squares(vprojDkvy),
+        #     cp.sum_squares(vprojCku),
+        #     cp.sum_squares(vprojDkuw),
+        #     cp.sum_squares(vprojDkuy),
+        # ])
         # fmt: on
         objective = cost_projection_error
 
@@ -413,12 +426,12 @@ class Projector:
         self.pproj_MDeltapvv.value = MDeltapvv
         self.pproj_MDeltapvw.value = MDeltapvw
         self.pproj_MDeltapww.value = MDeltapww
-        print("\n\n")
-        print(f"Theta project LDeltap: {LDeltap}")
-        print(f"Theta project MDeltapvv: {MDeltapvv}")
-        print(f"Theta project MDeltapvw: {MDeltapvw}")
-        print(f"Theta project MDeltapww: {MDeltapww}")
-        print("\n\n")
+        # print("\n\n")
+        # print(f"Theta project LDeltap: {LDeltap}")
+        # print(f"Theta project MDeltapvv: {MDeltapvv}")
+        # print(f"Theta project MDeltapvw: {MDeltapvw}")
+        # print(f"Theta project MDeltapww: {MDeltapww}")
+        # print("\n\n")
 
         try:
             # t0 = time.perf_counter()
@@ -448,6 +461,9 @@ class Projector:
             None
         )
         # fmt: on
+
+        assert np.all(np.tril(self.vproj_k.Dkvw.value, 0) == 0), f"Matrix is not strictly upper triangular: {self.vproj_k.Dkvw.value}, {self.Dkvw_structure}"
+
 
         return new_controller_params
 
@@ -490,7 +506,7 @@ class Projector:
         )
         mat = construct_dissipativity_matrix(
             A, Bw, Bd, Cv, Dvw, Dvd, Ce, Dew, Ded, self.vcheckP,
-            LDelta, Mvw, Mww, 
+            LDelta, Mvw, Mww,
             self.plant_params.Xdd, self.plant_params.Xde, self.LX,
             "cvxpy"
         )
@@ -510,14 +526,14 @@ class Projector:
         ]
 
         # fmt: off
-        cost_projection_error = sum([
-            cp.sum_squares(self.vcheckP - self.pcheckP),
-            cp.sum_squares(self.vcheckLambda - self.pcheck_k.Lambda),
-        ])
-        cost_size = sum([
-            cp.sum_squares(self.vcheckP),
-            cp.sum_squares(self.vcheckLambda),
-        ])
+        # cost_projection_error = sum([
+        #     cp.sum_squares(self.vcheckP - self.pcheckP),
+        #     cp.sum_squares(self.vcheckLambda - self.pcheck_k.Lambda),
+        # ])
+        # cost_size = sum([
+        #     cp.sum_squares(self.vcheckP),
+        #     cp.sum_squares(self.vcheckLambda),
+        # ])
         # fmt: on
         objective = -self.vcheckEps
 
@@ -658,21 +674,24 @@ class Projector:
             mat << -self.vcheck2Eps,
             self.vcheck2Eps >= 0,
         ] + MDeltap_constraints
-        objective = -self.vcheck2Eps
 
-        # TODO: this is a test to regulate size of MDeltap
-        objective += cp.sum(
-            [
-                cp.sum_squares(v - p)
-                for (v, p) in [
-                    (self.vcheck2P, self.pcheck2P),
-                    (self.vcheck2Lambda, self.pcheck2Lambda),
-                    (self.vcheck2MDeltapvv, self.pcheck2MDeltapvv),
-                    (self.vcheck2MDeltapvw, self.pcheck2MDeltapvw),
-                    (self.vcheck2MDeltapww, self.pcheck2MDeltapww),
-                ]
-            ]
-        )
+
+        # objective = -self.vcheck2Eps
+        # # TODO: this is a test to regulate size of MDeltap
+        # objective += cp.sum(
+        #     [
+        #         cp.sum_squares(v - p)
+        #         for (v, p) in [
+        #             # (self.vcheck2P, self.pcheck2P),
+        #             (self.vcheck2Lambda, self.pcheck2Lambda),
+        #             (self.vcheck2MDeltapvv, self.pcheck2MDeltapvv),
+        #             (self.vcheck2MDeltapvw, self.pcheck2MDeltapvw),
+        #             (self.vcheck2MDeltapww, self.pcheck2MDeltapww),
+        #         ]
+        #     ]
+        # )
+
+        objective = cp.lambda_max(self.vcheck2P) - cp.lambda_min(self.vcheck2P)
 
         self.check2_problem = cp.Problem(cp.Minimize(objective), constraints)
 
@@ -747,10 +766,10 @@ class Projector:
 
         # print(f"newP: {newP}")
         # print(f"newLambda: {newLambda}")
-        print("Found new MDeltap:")
-        print(f"newMDeltapvv: {newMDeltapvv}")
-        print(f"newMDeltapvw: {newMDeltapvw}")
-        print(f"newMDeltapww: {newMDeltapww}")
+        # print("Found new MDeltap:")
+        # print(f"newMDeltapvv: {newMDeltapvv}")
+        # print(f"newMDeltapvw: {newMDeltapvw}")
+        # print(f"newMDeltapww: {newMDeltapww}")
         return True, newP, newLambda, newMDeltapvv, newMDeltapvw, newMDeltapww
 
 
@@ -768,6 +787,11 @@ class LTIProjector:
         input_size,
         # A function takes in epsilon and returns (MDeltapvv, MDeltapvw, MDeltapww, [variables] [constraints])
         plant_uncertainty_constraints=None,
+        # If either is None, minimizes sum square error between original and new param
+        # If both are floats, then minimize weighted combination of respective norms of *just* new params
+        min_params_norm2=None,
+        min_params_norminf=None,
+        sphere_P=False, # If None, in dissipativity checks, minimizes -eps s.t. mat << -eps, if True, then min t-s s.t. tI >= P_new >= s I
     ):
         self.plant_params = plant_params
         self.eps = eps
@@ -775,6 +799,9 @@ class LTIProjector:
         self.state_size = state_size
         self.input_size = input_size
         self.nonlin_size = 1  # placeholder nonlin size used for creating zeros
+        self.min_params_norm2 = min_params_norm2
+        self.min_params_norminf = min_params_norminf
+        self.sphere_P = sphere_P
 
         assert is_positive_semidefinite(plant_params.MDeltapvv)
         Dm, Vm = np.linalg.eigh(plant_params.MDeltapvv)
@@ -790,6 +817,7 @@ class LTIProjector:
         self._construct_check_dissipativity_problem()
         if self.plant_uncertainty_constraints is not None:
             self._construct_check_dissipativity_problem2()
+
 
     def _construct_projection_problem(self):
         # Define projection problem: Projecting theta into BMI parameterized by P and Lambda.
@@ -864,14 +892,24 @@ class LTIProjector:
             cp.sum_squares(pprojCku - vprojCku),
             cp.sum_squares(pprojDkuy - vprojDkuy),
         ])
-        cost_size = sum([
-            cp.sum_squares(vprojAk),
-            cp.sum_squares(vprojBky),
-            cp.sum_squares(vprojCku),
-            cp.sum_squares(vprojDkuy),
+        vparams = cp.bmat([
+            [vprojAk, vprojBky],
+            [vprojCku, vprojDkuy]
         ])
+        # cost_size = sum([
+        #     cp.sum_squares(vprojAk),
+        #     cp.sum_squares(vprojBky),
+        #     cp.sum_squares(vprojCku),
+        #     cp.sum_squares(vprojDkuy),
+        # ])
         # fmt: on
-        objective = cost_projection_error
+        if self.min_params_norm2 is None or self.min_params_norminf is None:
+            objective = cost_projection_error
+        else:
+            objective = (
+                self.min_params_norm2 * cp.norm2(vparams.flatten())
+                + self.min_params_norminf * cp.norm_inf(vparams.flatten())
+            )
 
         self.proj_problem = cp.Problem(cp.Minimize(objective), constraints)
 
@@ -896,12 +934,12 @@ class LTIProjector:
         self.pproj_MDeltapvv.value = MDeltapvv
         self.pproj_MDeltapvw.value = MDeltapvw
         self.pproj_MDeltapww.value = MDeltapww
-        print("\n\n")
-        print(f"Theta project LDeltap: {LDeltap}")
-        print(f"Theta project MDeltapvv: {MDeltapvv}")
-        print(f"Theta project MDeltapvw: {MDeltapvw}")
-        print(f"Theta project MDeltapww: {MDeltapww}")
-        print("\n\n")
+        # print("\n\n")
+        # print(f"Theta project LDeltap: {LDeltap}")
+        # print(f"Theta project MDeltapvv: {MDeltapvv}")
+        # print(f"Theta project MDeltapvw: {MDeltapvw}")
+        # print(f"Theta project MDeltapww: {MDeltapww}")
+        # print("\n\n")
 
         try:
             # t0 = time.perf_counter()
@@ -974,7 +1012,7 @@ class LTIProjector:
         )
         mat = construct_dissipativity_matrix(
             A, Bw, Bd, Cv, Dvw, Dvd, Ce, Dew, Ded, self.vcheckP,
-            LDelta, Mvw, Mww, 
+            LDelta, Mvw, Mww,
             self.plant_params.Xdd, self.plant_params.Xde, self.LX,
             "cvxpy"
         )
@@ -1118,18 +1156,21 @@ class LTIProjector:
 
         # cost_projection_error = cp.sum_squares(self.vcheck2P - self.pcheck2P)
         # cost_size = cp.sum_squares(self.vcheck2P)
-        objective = -self.vcheck2Eps
-        objective += cp.sum(
-            [
-                cp.sum_squares(v - p)
-                for (v, p) in [
-                    (self.vcheck2P, self.pcheck2P),
-                    (self.vcheck2MDeltapvv, self.pcheck2MDeltapvv),
-                    (self.vcheck2MDeltapvw, self.pcheck2MDeltapvw),
-                    (self.vcheck2MDeltapww, self.pcheck2MDeltapww),
+        if self.sphere_P:
+            objective = -self.vcheck2Eps + cp.lambda_max(self.vcheck2P) - cp.lambda_min(self.vcheck2P)
+        else:
+            objective = -self.vcheck2Eps
+            objective += cp.sum(
+                [
+                    cp.sum_squares(v - p)
+                    for (v, p) in [
+                        (self.vcheck2P, self.pcheck2P),
+                        (self.vcheck2MDeltapvv, self.pcheck2MDeltapvv),
+                        (self.vcheck2MDeltapvw, self.pcheck2MDeltapvw),
+                        (self.vcheck2MDeltapww, self.pcheck2MDeltapww),
+                    ]
                 ]
-            ]
-        )
+            )
 
         self.check2_problem = cp.Problem(cp.Minimize(objective), constraints)
 
@@ -1194,9 +1235,9 @@ class LTIProjector:
         else:
             newMDeltapww = self.vcheck2MDeltapww.value.toarray()
 
-        print("Found new MDeltap:")
-        print(f"newMDeltapvv: {newMDeltapvv}")
-        print(f"newMDeltapvw: {newMDeltapvw}")
-        print(f"newMDeltapww: {newMDeltapww}")
+        # print("Found new MDeltap:")
+        # print(f"newMDeltapvv: {newMDeltapvv}")
+        # print(f"newMDeltapvw: {newMDeltapvw}")
+        # print(f"newMDeltapww: {newMDeltapww}")
 
         return True, newP, newMDeltapvv, newMDeltapvw, newMDeltapww

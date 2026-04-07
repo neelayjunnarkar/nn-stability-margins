@@ -9,13 +9,12 @@ import numpy as np
 import ray
 from ray import tune
 
-from envs import (
-    CrownPendulumEnv,
-)
+from envs import InvertedPendulumEnv
 from models import (
     DissipativeSimplestRINN,
 )
 from trainers import ProjectedPPOTrainer
+from utils import ExportWeightsCallback
 
 use_savio = False
 if use_savio:
@@ -33,6 +32,15 @@ seed = 1
 
 
 # Same dt must be used in controller models
+dt = 0.01
+env = InvertedPendulumEnv
+env_config = {
+    "observation": "full",
+    "normed": True,
+    "dt": dt,
+    "supply_rate": "l2_gain",
+    "disturbance_model": "none",
+}
 # dt = 0.01
 # env = InvertedPendulumEnv
 # env_config = {
@@ -101,13 +109,6 @@ seed = 1
 #     # "alpha": 0,
 # }
 
-dt = 0.001
-env = CrownPendulumEnv
-env_config = {
-    "dt": dt,
-    "seed": seed,
-}
-
 # Configure the algorithm.
 config = {
     "env": env,
@@ -131,7 +132,7 @@ config = {
         "custom_model": DissipativeSimplestRINN,
         "custom_model_config": {
             "state_size": 2,
-            "nonlin_size": 16,
+            "nonlin_size": 8,
             "log_std_init": np.log(1.0),
             "dt": dt,
             "plant": env,
@@ -148,6 +149,7 @@ config = {
                 "backoff_factor": 1.1,
             },
             "fix_mdeltap": False,
+            "Dkvw_structure": "strict_upper_triang",  # "full" or "strict_upper_triang"
         },
         # "custom_model": LTIModel,
         # "custom_model_config": {
@@ -171,7 +173,7 @@ config = {
     },
     ## Custom Policy Parameters
     # How often to do projection. n -> every n'th gradient step. E.g., 1 -> every gradient step.
-    "projection_period": 100,
+    "projection_period": 1,
     ## Testing changes to training parameters
     "sgd_minibatch_size": 2048,
     "train_batch_size": 20480,
@@ -186,6 +188,7 @@ config = {
     "evaluation_config": {"render_env": False, "explore": False},
     "evaluation_interval": 1,
     "evaluation_parallel_to_training": True,
+    "callbacks": ExportWeightsCallback,
 }
 
 print("==================================")
@@ -225,5 +228,5 @@ results = tune.run(
     name="scratch",
     local_dir="ray_results",
     checkpoint_at_end=True,
-    checkpoint_freq=1000,
+    checkpoint_freq=1,
 )

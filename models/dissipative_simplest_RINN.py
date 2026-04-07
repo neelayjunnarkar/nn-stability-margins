@@ -74,8 +74,9 @@ class DissipativeSimplestRINN(RecurrentNetwork, nn.Module):
     #   trs_mode: fixed
     #   min_trs:  1.0
     #   backoff_factor: 1.1
-    #   mode: simplest
+    #   mode: thetahat (don't really use anything else)
     #   fix_mdeltap: true
+    #   Dkvw_structure: "full" or "strict_upper_triang"
     def __init__(
         self,
         obs_space,
@@ -103,6 +104,12 @@ class DissipativeSimplestRINN(RecurrentNetwork, nn.Module):
         )
         self.input_size = obs_space.shape[0]
         self.output_size = action_space.shape[0]
+
+        self.Dkvw_structure = (
+            model_config["Dkvw_structure"]
+            if "Dkvw_structure" in model_config
+            else "full"
+        )
 
         if "delta" not in model_config:
             model_config["delta"] = "tanh"
@@ -201,7 +208,9 @@ class DissipativeSimplestRINN(RecurrentNetwork, nn.Module):
             lti_controller_kwargs["input_size"] = self.input_size
             lti_controller_kwargs["output_size"] = self.output_size
             lti_controller, info = lti_controllers.controller_map[lti_initializer](
-                np_plant_params, **lti_controller_kwargs
+                np_plant_params,
+                plant_uncertainty_constraints=plant.plant_uncertainty_constraints,
+                **lti_controller_kwargs,
             )
             lti_controller = lti_controller.np_to_torch(device=self.Lambda.device)
 
@@ -226,6 +235,8 @@ class DissipativeSimplestRINN(RecurrentNetwork, nn.Module):
                 print("Using P from LTI initialization.")
                 self.P0 = info["P"]  # from_numpy(info["P"], device=self.A_T.device)
                 self.P = from_numpy(self.P0, device=self.A_T.device)
+                print("Condition Number: ", torch.linalg.cond(self.P))
+                print("\n\n")
             # Might not want the following
             self.Lambda0 = np.zeros((self.nonlin_size, self.nonlin_size))
             self.Lambda = from_numpy(self.Lambda0, device=self.log_stds.device)
@@ -258,6 +269,7 @@ class DissipativeSimplestRINN(RecurrentNetwork, nn.Module):
             state_size=self.state_size,
             input_size=self.input_size,
             plant_uncertainty_constraints=plant.plant_uncertainty_constraints,
+            Dkvw_structure=self.Dkvw_structure,
         )
 
         trs_mode = model_config["trs_mode"] if "trs_mode" in model_config else "fixed"
@@ -276,6 +288,7 @@ class DissipativeSimplestRINN(RecurrentNetwork, nn.Module):
             trs_mode=trs_mode,
             min_trs=min_trs,
             backoff_factor=backoff_factor,
+            Dkvw_structure=self.Dkvw_structure,
         )
 
         self.mode = model_config["mode"] if "mode" in model_config else "thetahat"
@@ -554,9 +567,19 @@ class DissipativeSimplestRINN(RecurrentNetwork, nn.Module):
         """Computes solution for derivative of x given x and y, and possibly w or an initial guess for w."""
         # w is the solution w = Delta(v), and w0 is a guess for the solution w = Delta(v)
         if w is None:
+            match self.Dkvw_structure:
+                case "full":
+                    Dvw_T = self.Dvw_T
+                case "strict_upper_triang":
+                    # upper triangular is equiv to lower triangular of transpose
+                    Dvw_T = self.Dvw_T.tril(diagonal=-1)
+                case _:
+                    raise ValueError(
+                        f"Unexpected Dkvw_structure: {self.Dkvw_structure}"
+                    )
 
             def delta_tilde(w):
-                v = x @ self.Cv_T + w @ self.Dvw_T + y @ self.Dvy_T
+                v = x @ self.Cv_T + w @ Dvw_T + y @ self.Dvy_T
                 return self.delta(v)
 
             reuse = True
@@ -600,6 +623,15 @@ class DissipativeSimplestRINN(RecurrentNetwork, nn.Module):
         assert not torch.any(torch.isnan(obs))
         assert not torch.any(torch.isnan(xkp1)), xkp1
 
+        match self.Dkvw_structure:
+            case "full":
+                Dvw_T = self.Dvw_T
+            case "strict_upper_triang":
+                # upper triangular is equiv to lower triangular of transpose
+                Dvw_T = self.Dvw_T.tril(diagonal=-1)
+            case _:
+                raise ValueError(f"Unexpected Dkvw_structure: {self.Dkvw_structure}")
+
         for k in range(time_len):
             # Set action for time k
 
@@ -614,7 +646,7 @@ class DissipativeSimplestRINN(RecurrentNetwork, nn.Module):
             assert not torch.any(torch.isnan(wk0)), f"At time {k}, wk0 has nans"
 
             def delta_tilde(w):
-                v = xk @ self.Cv_T + w @ self.Dvw_T + yk @ self.Dvy_T
+                v = xk @ self.Cv_T + w @ Dvw_T + yk @ self.Dvy_T
                 return self.delta(v)
 
             solver_kwargs = {"f_max_iter": 5} if reuse else {}

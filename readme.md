@@ -1,7 +1,7 @@
 Stability Margins of Neural Network Controllers
 ===================================
 
-This repository contains code for the paper "Stability Margins of Neural Network Controllers"
+This repository contains code for the paper "[Stability Margins of Neural Network Controllers](https://ieeexplore.ieee.org/document/11107746/)"
 
 ## File Structure
 

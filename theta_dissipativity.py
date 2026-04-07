@@ -728,13 +728,20 @@ class Projector:
         if isinstance(self.vcheck2MDeltapvv, np.ndarray):
             newMDeltapvv = self.vcheck2MDeltapvv
         else:
-            newMDeltapvv = self.vcheck2MDeltapvv.value.toarray()
+            if isinstance(self.vcheck2MDeltapvv.value, np.ndarray):
+                newMDeltapvv = self.vcheck2MDeltapvv.value
+            else:
+                newMDeltapvv = self.vcheck2MDeltapvv.value.toarray()
         if isinstance(self.vcheck2MDeltapvw, np.ndarray):
             newMDeltapvw = self.vcheck2MDeltapvw
+        elif isinstance(self.vcheck2MDeltapvw.value, np.ndarray):
+            newMDeltapvw = self.vcheck2MDeltapvw.value
         else:
             newMDeltapvw = self.vcheck2MDeltapvw.value.toarray()
         if isinstance(self.vcheck2MDeltapww, np.ndarray):
             newMDeltapww = self.vcheck2MDeltapww
+        elif isinstance(self.vcheck2MDeltapww.value, np.ndarray):
+            newMDeltapww = self.vcheck2MDeltapww.value
         else:
             newMDeltapww = self.vcheck2MDeltapww.value.toarray()
 
@@ -1170,13 +1177,20 @@ class LTIProjector:
         if isinstance(self.vcheck2MDeltapvv, np.ndarray):
             newMDeltapvv = self.vcheck2MDeltapvv
         else:
-            newMDeltapvv = self.vcheck2MDeltapvv.value.toarray()
+            if isinstance(self.vcheck2MDeltapvv.value, np.ndarray):
+                newMDeltapvv = self.vcheck2MDeltapvv.value
+            else:
+                newMDeltapvv = self.vcheck2MDeltapvv.value.toarray()
         if isinstance(self.vcheck2MDeltapvw, np.ndarray):
             newMDeltapvw = self.vcheck2MDeltapvw
+        elif isinstance(self.vcheck2MDeltapvw.value, np.ndarray):
+            newMDeltapvw = self.vcheck2MDeltapvw.value
         else:
             newMDeltapvw = self.vcheck2MDeltapvw.value.toarray()
         if isinstance(self.vcheck2MDeltapww, np.ndarray):
             newMDeltapww = self.vcheck2MDeltapww
+        elif isinstance(self.vcheck2MDeltapww.value, np.ndarray):
+            newMDeltapww = self.vcheck2MDeltapww.value
         else:
             newMDeltapww = self.vcheck2MDeltapww.value.toarray()
 

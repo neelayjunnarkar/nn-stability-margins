@@ -276,6 +276,7 @@ class LTIModel(RecurrentNetwork, nn.Module):
         if self.oldtheta is not None:
             print_norms(theta - self.oldtheta, "theta - oldtheta")
         self.oldtheta = theta.detach().clone()
+        
 
     def enforce_dissipativity(self):
         """Projects current theta parameters to ones that are certified by P and MDeltap."""

@@ -4,29 +4,18 @@ Main file for configuring and training controllers.
 
 import math
 import os
-import multiprocessing
 
 import numpy as np
 import ray
-import torch
 from ray import tune
-from ray.rllib.agents.ppo import PPOTrainer
 
-from envs import FlexibleArmEnv, InvertedPendulumEnv, TimeDelayInvertedPendulumEnv, DiskMarginExampleEnv, FlexibleArmDiskMarginEnv
-
-import lti_controllers
-
+from envs import (
+    CrownPendulumEnv,
+)
 from models import (
-    RINN,
-    RNN,
-    DissipativeRINN,
     DissipativeSimplestRINN,
-    FullyConnectedNetwork,
-    ImplicitModel,
-    LTIModel,
 )
 from trainers import ProjectedPPOTrainer
-
 
 use_savio = False
 if use_savio:
@@ -35,8 +24,8 @@ if use_savio:
     JOB_ID = os.getenv("SLURM_JOB_ID")
 else:
     # N_CPUS = 1 # test
-    # N_CPUS = 2 # test
-    N_CPUS = multiprocessing.cpu_count()
+    N_CPUS = 2  # test
+    # N_CPUS = multiprocessing.cpu_count()
 n_tasks = 1
 n_workers_per_task = int(math.floor(N_CPUS / n_tasks)) - 1 - 1
 
@@ -99,17 +88,24 @@ seed = 1
 #     "dt": dt,
 #     "seed": seed,
 # }
+# dt = 0.001
+# env = FlexibleArmDiskMarginEnv
+# env_config = {
+#     "dt": dt,
+#     "seed": seed,
+#     "normed": True,
+#     "rollout_length": int(2 / dt) - 1,
+#     "disturbance_model": "occasional",
+#     "disk_margin_type": "12dB60deg", # "6dB36deg",
+#     # "skew": 0,
+#     # "alpha": 0,
+# }
+
 dt = 0.001
-env = FlexibleArmDiskMarginEnv
+env = CrownPendulumEnv
 env_config = {
     "dt": dt,
     "seed": seed,
-    "normed": True,
-    "rollout_length": int(2 / dt) - 1,
-    "disturbance_model": "occasional",
-    "disk_margin_type": "12dB60deg", # "6dB36deg",
-    # "skew": 0,
-    # "alpha": 0,
 }
 
 # Configure the algorithm.
@@ -132,46 +128,46 @@ config = {
         #     "plant_config": env_config,
         #     "eps": 1e-3,
         # },
-        # "custom_model": DissipativeSimplestRINN,
-        # "custom_model_config": {
-        #     "state_size": 2,
-        #     "nonlin_size": 16,
-        #     "log_std_init": np.log(1.0),
-        #     "dt": dt,
-        #     "plant": env,
-        #     "plant_config": env_config,
-        #     "eps": 1e-3,
-        #     "mode": "thetahat",
-        #     "trs_mode": "fixed",
-        #     "min_trs": 1,
-        #     "backoff_factor": 1.1,
-        #     "lti_initializer": "dissipative_thetahat",
-        #     "lti_initializer_kwargs": {
-        #         "trs_mode": "fixed",
-        #         "min_trs": 1,
-        #         "backoff_factor": 1.1,
-        #     },
-        #     "fix_mdeltap": False
-        # },
-        "custom_model": LTIModel,
+        "custom_model": DissipativeSimplestRINN,
         "custom_model_config": {
+            "state_size": 2,
+            "nonlin_size": 16,
+            "log_std_init": np.log(1.0),
             "dt": dt,
             "plant": env,
             "plant_config": env_config,
-            "learn": True,
-            "log_std_init": np.log(1.0),
-            "state_size": 2,
+            "eps": 1e-3,
+            "mode": "thetahat",
             "trs_mode": "fixed",
-            "min_trs": 1,  # 1.5, # 1.44,
+            "min_trs": 1,
             "backoff_factor": 1.1,
-            "lti_controller": "dissipative_thetahat",
-            "lti_controller_kwargs": {
+            "lti_initializer": "dissipative_thetahat",
+            "lti_initializer_kwargs": {
                 "trs_mode": "fixed",
-                "min_trs": 1,  # 1.5 # 1.44
+                "min_trs": 1,
                 "backoff_factor": 1.1,
             },
             "fix_mdeltap": False,
         },
+        # "custom_model": LTIModel,
+        # "custom_model_config": {
+        #     "dt": dt,
+        #     "plant": env,
+        #     "plant_config": env_config,
+        #     "learn": True,
+        #     "log_std_init": np.log(1.0),
+        #     "state_size": 2,
+        #     "trs_mode": "fixed",
+        #     "min_trs": 1,  # 1.5, # 1.44,
+        #     "backoff_factor": 1.1,
+        #     "lti_controller": "dissipative_thetahat",
+        #     "lti_controller_kwargs": {
+        #         "trs_mode": "fixed",
+        #         "min_trs": 1,  # 1.5 # 1.44
+        #         "backoff_factor": 1.1,
+        #     },
+        #     "fix_mdeltap": False,
+        # },
     },
     ## Custom Policy Parameters
     # How often to do projection. n -> every n'th gradient step. E.g., 1 -> every gradient step.
@@ -202,7 +198,7 @@ print("")
 
 test_env = env(env_config)
 print(
-    f"Max reward per: step: {test_env.max_reward}, rollout: {test_env.max_reward*(test_env.time_max+1)}"
+    f"Max reward per: step: {test_env.max_reward}, rollout: {test_env.max_reward * (test_env.time_max + 1)}"
 )
 print("==================================")
 

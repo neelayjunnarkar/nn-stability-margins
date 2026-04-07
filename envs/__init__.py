@@ -7,6 +7,7 @@ from envs.time_delay_inverted_pendulum import TimeDelayInvertedPendulumEnv
 from envs.flex_arm import FlexibleArmEnv
 from envs.disk_margin_example import DiskMarginExampleEnv
 from envs.flex_arm_disk_margin import FlexibleArmDiskMarginEnv
+from envs.crown_pendulum import CrownPendulumEnv
 
 env_map = {
     "<class 'envs.inverted_pendulum.InvertedPendulumEnv'>": InvertedPendulumEnv,

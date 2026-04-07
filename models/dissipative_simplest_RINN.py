@@ -91,9 +91,9 @@ class DissipativeSimplestRINN(RecurrentNetwork, nn.Module):
 
         model_config = model_config["custom_model_config"]
 
-        assert (
-            2 * action_space.shape[0] == num_outputs
-        ), "Num outputs should be 2 * action dimension"
+        assert 2 * action_space.shape[0] == num_outputs, (
+            "Num outputs should be 2 * action dimension"
+        )
 
         self.state_size = (
             model_config["state_size"] if "state_size" in model_config else 16
@@ -160,7 +160,7 @@ class DissipativeSimplestRINN(RecurrentNetwork, nn.Module):
 
         # Initial values for P
         if "P" in model_config:
-            self.P0 = model_config["P"] # from_numpy(model_config["P"])
+            self.P0 = model_config["P"]  # from_numpy(model_config["P"])
             self.P = from_numpy(self.P0, device=self.log_stds.device)
 
         # Initial values for Lambda
@@ -170,7 +170,9 @@ class DissipativeSimplestRINN(RecurrentNetwork, nn.Module):
             #     model_config["Lambda"], device=self.log_stds.device
             # )
         else:
-            self.Lambda0 = np.eye(self.nonlin_size) # torch.eye(self.nonlin_size, device=self.log_stds.device)
+            self.Lambda0 = np.eye(
+                self.nonlin_size
+            )  # torch.eye(self.nonlin_size, device=self.log_stds.device)
         self.Lambda = from_numpy(self.Lambda0, device=self.log_stds.device)
 
         # Initialize values for MDeltap
@@ -222,7 +224,7 @@ class DissipativeSimplestRINN(RecurrentNetwork, nn.Module):
 
             if "P" in info and "P" not in model_config:
                 print("Using P from LTI initialization.")
-                self.P0 = info["P"] # from_numpy(info["P"], device=self.A_T.device)
+                self.P0 = info["P"]  # from_numpy(info["P"], device=self.A_T.device)
                 self.P = from_numpy(self.P0, device=self.A_T.device)
             # Might not want the following
             self.Lambda0 = np.zeros((self.nonlin_size, self.nonlin_size))
@@ -241,7 +243,9 @@ class DissipativeSimplestRINN(RecurrentNetwork, nn.Module):
             self.Duy_T = nn.Parameter(uniform(self.input_size, self.output_size))
 
             if "P" not in model_config:
-                self.P0 = np.eye(self.plant_params.Ap.shape[0] + self.state_size) # torch.eye(self.plant_params.Ap.shape[0] + self.state_size)
+                self.P0 = np.eye(
+                    self.plant_params.Ap.shape[0] + self.state_size
+                )  # torch.eye(self.plant_params.Ap.shape[0] + self.state_size)
                 self.P = from_numpy(self.P0, device=self.A_T.device)
 
         apply_norm(self, filter_out=["A_T", "Bw_T", "By_T", "Cu_T", "Duw_T", "Duy_T"])
@@ -373,14 +377,20 @@ class DissipativeSimplestRINN(RecurrentNetwork, nn.Module):
                                     "\nResetting P and Lambda to make thetaprime safe!\n"
                                 )
                                 self.P = from_numpy(self.P0, device=self.P.device)
-                                self.Lambda = from_numpy(self.Lambda0, device=self.Lambda.device)
+                                self.Lambda = from_numpy(
+                                    self.Lambda0, device=self.Lambda.device
+                                )
                                 self.enforce_thetahat_dissipativity()
                             except Exception as e3:
                                 print(f"Failure 3: {e3}")
                                 # Reset MDeltap
                                 self.P = from_numpy(self.P0, device=self.P.device)
-                                self.Lambda = from_numpy(self.Lambda0, device=self.Lambda.device)
-                                self.LDeltap = MDeltapvvToLDeltap(self.np_plant_params.MDeltapvv)
+                                self.Lambda = from_numpy(
+                                    self.Lambda0, device=self.Lambda.device
+                                )
+                                self.LDeltap = MDeltapvvToLDeltap(
+                                    self.np_plant_params.MDeltapvv
+                                )
                                 self.MDeltapvv = self.np_plant_params.MDeltapvv
                                 self.MDeltapvw = self.np_plant_params.MDeltapvw
                                 self.MDeltapww = self.np_plant_params.MDeltapww
@@ -401,7 +411,7 @@ class DissipativeSimplestRINN(RecurrentNetwork, nn.Module):
         # print_norms(self.Bw_T.t(), "Bkw  ")
         # print_norms(self.By_T.t(), "Bky  ")
         # print_norms(self.Cv_T.t(), "Ckv  ")
-        print_norms(self.Dvw_T.t(), "Dkvw ")
+        # print_norms(self.Dvw_T.t(), "Dkvw ")
         # print_norms(self.Dvy_T.t(), "Dkvy ")
         # print_norms(self.Cu_T.t(), "Cku  ")
         # print_norms(self.Duw_T.t(), "Dkuw ")
@@ -449,9 +459,9 @@ class DissipativeSimplestRINN(RecurrentNetwork, nn.Module):
             },
             strict=False,
         )
-        assert (
-            unexpected == []
-        ), f"Loading unexpected key after projection: {unexpected}"
+        assert unexpected == [], (
+            f"Loading unexpected key after projection: {unexpected}"
+        )
         # fmt: off
         assert missing == [
             "log_stds", "value.0.bias", "value.0.weight_g", "value.0.weight_v",
@@ -518,9 +528,9 @@ class DissipativeSimplestRINN(RecurrentNetwork, nn.Module):
             },
             strict=False,
         )
-        assert (
-            unexpected == []
-        ), f"Loading unexpected key after projection: {unexpected}"
+        assert unexpected == [], (
+            f"Loading unexpected key after projection: {unexpected}"
+        )
         # fmt: off
         assert missing == [
             "log_stds", "value.0.bias", "value.0.weight_g", "value.0.weight_v",
@@ -620,9 +630,9 @@ class DissipativeSimplestRINN(RecurrentNetwork, nn.Module):
                 wk, info = self.deq(delta_tilde, wk0)
                 assert len(wk) > 0
                 wk = wk[-1]
-            assert not torch.any(
-                torch.isnan(wk)
-            ), f"At time {k}, wk has nans: {wk}, {info}"
+            assert not torch.any(torch.isnan(wk)), (
+                f"At time {k}, wk has nans: {wk}, {info}"
+            )
 
             uk = xk @ self.Cu_T + wk @ self.Duw_T + yk @ self.Duy_T
             actions[:, k] = uk
